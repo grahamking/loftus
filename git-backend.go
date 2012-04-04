@@ -6,14 +6,22 @@ import (
     "strings"
     "os/exec"
     "path/filepath"
+    "time"
+    "sync"
 )
 
 const (
     GIT_BIN = "/usr/bin/git"
+    COMMIT_PAUSE = 2
+    PUSH_PAUSE = 10
 )
 
 type GitBackend struct {
     RootDir string
+    commitLock sync.Mutex
+    isCommitPending bool
+    pushLock sync.Mutex
+    isPushPending bool
 }
 
 func (self *GitBackend) Created(filename string) {
@@ -21,8 +29,9 @@ func (self *GitBackend) Created(filename string) {
         return
     }
     fmt.Println("GitBackend created:", filename)
-    self.git("add", filename)
-    self.commit()
+    relPart, _ := filepath.Rel(self.RootDir, filename)
+    self.git("add", relPart)
+    go self.commitLater()
 }
 
 func (self *GitBackend) Modified(filename string) {
@@ -30,7 +39,7 @@ func (self *GitBackend) Modified(filename string) {
         return
     }
     fmt.Println("GitBackend modified:", filename, "in", self.RootDir)
-    self.commit()
+    go self.commitLater()
 }
 
 func (self *GitBackend) Deleted(filename string) {
@@ -39,8 +48,9 @@ func (self *GitBackend) Deleted(filename string) {
     }
     fmt.Println("GitBackend deleted:", filename)
 
-    self.git("rm", filename)
-    self.commit()
+    relPart, _ := filepath.Rel(self.RootDir, filename)
+    self.git("rm", relPart)
+    go self.commitLater()
 }
 
 // Should the inotify watch watch the given path
@@ -53,30 +63,57 @@ func (self *GitBackend) isGit(filename string) bool {
     return strings.Contains(filename, ".git")
 }
 
+// Schedule a commit for in a few seconds
+func (self *GitBackend) commitLater() {
+
+    // ensure only once per time - might be able to use sync.Once instead (?)
+    self.commitLock.Lock()
+    if self.isCommitPending {
+        self.commitLock.Unlock()
+        return
+    }
+    self.isCommitPending = true
+    self.commitLock.Unlock()
+
+    time.Sleep(COMMIT_PAUSE * time.Second)
+    self.commit()
+
+    go self.pushLater()
+
+    self.isCommitPending = false
+}
+
+// Run: git commit --all
 func (self *GitBackend) commit() {
-
-    cmd := exec.Command(GIT_BIN, "commit", "--all", "--message=bup")
-    cmd.Dir = self.RootDir
-
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        log.Println(err)
-    }
-    fmt.Println(string(output))
+    self.git("commit", "--all", "--message=bup")
 }
 
+// Schedule a push for later
+func (self *GitBackend) pushLater() {
+
+    // ensure only once per time - might be able to use sync.Once instead (?)
+    self.pushLock.Lock()
+    if self.isPushPending {
+        self.pushLock.Unlock()
+        return
+    }
+    self.isPushPending = true
+    self.pushLock.Unlock()
+
+    time.Sleep(PUSH_PAUSE * time.Second)
+    self.push()
+
+    self.isPushPending = false
+}
+
+// Run: git push
 func (self *GitBackend) push() {
-    git("push", nil)
+    self.git("push")
 }
 
-func (self *GitBackend) git(gitCmd string, filename string) {
+func (self *GitBackend) git(gitCmd string, args ...string) {
 
-    if filename != nil {
-        relPart, _ := filepath.Rel(self.RootDir, filename)
-        cmd := exec.Command(GIT_BIN, gitCmd, relPart)
-    } else {
-        cmd := exec.Command(GIT_BIN, gitCmd)
-    }
+    cmd := exec.Command(GIT_BIN, append([]string{gitCmd}, args...)...)
     cmd.Dir = self.RootDir
 
     output, err := cmd.CombinedOutput()
