@@ -23,9 +23,19 @@ type ChangeAgent interface {
 func main() {
 
     if len(os.Args) != 2 {
-        fmt.Println("USAGE: bup <dir_to_sync>")
+        fmt.Println("USAGE: bup <dir_to_sync|--server>")
         os.Exit(1)
     }
+
+    if os.Args[1] == "--server" {
+        start_server("127.0.0.1:8007")
+    } else {
+        start_client()
+    }
+}
+
+// Watch directories, called sync methods on backend, etc
+func start_client() {
 
     dir := strings.TrimRight(os.Args[1], "/")
     watcher, _ := inotify.NewWatcher()
