@@ -3,14 +3,17 @@ package main
 import (
     "fmt"
     "os"
-    "exp/inotify"
     "log"
     "strings"
+    "net"
+    "bufio"
+    "exp/inotify"
     "path/filepath"
 )
 
 const (
     INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE
+    ADDR = "127.0.0.1:8007"
 )
 
 type ChangeAgent interface {
@@ -18,6 +21,8 @@ type ChangeAgent interface {
     Modified(filename string)
     Deleted(filename string)
     ShouldWatch(filename string) bool
+    Fetch()
+    RegisterPushHook(func())
 }
 
 func main() {
@@ -28,63 +33,102 @@ func main() {
     }
 
     if os.Args[1] == "--server" {
-        start_server("127.0.0.1:8007")
+        startServer(ADDR)
     } else {
-        start_client()
+        startClient()
     }
 }
 
 // Watch directories, called sync methods on backend, etc
-func start_client() {
+func startClient() {
 
-    dir := strings.TrimRight(os.Args[1], "/")
+    rootDir := strings.TrimRight(os.Args[1], "/")
+    backend := &GitBackend{RootDir: rootDir}
     watcher, _ := inotify.NewWatcher()
 
-    backend := &GitBackend{RootDir: dir}
+    client := Client{rootDir: rootDir, backend: backend, watcher: watcher}
+    client.addWatches()
+    fmt.Println("Watching:", rootDir)
 
-    addWatches(watcher, dir, backend)
-    fmt.Println("Watching:", dir)
+    go client.listenRemote()
+    client.run()
+}
 
+type Client struct {
+    backend ChangeAgent
+    rootDir string
+    watcher *inotify.Watcher
+    remote net.Conn
+}
+
+// Connect to server and listen for messages, which mean we have to fetch
+// new data from remote (the backend does that for us)
+func (self *Client) listenRemote() {
+
+    conn, err := net.Dial("tcp", ADDR)
+    if err != nil {
+        log.Fatal("Error connection to remote server")
+    }
+    self.remote = conn
+    defer self.remote.Close()
+
+	bufRead := bufio.NewReader(self.remote)
+    for {
+		content, err := bufRead.ReadString('\n')
+        if err != nil {
+            log.Fatal("Remote read error")
+        }
+        fmt.Println("Remote sent: " + content)
+
+        self.backend.Fetch()
+    }
+}
+
+func (self *Client) run() {
+
+    self.backend.RegisterPushHook(func() {
+        self.remote.Write([]byte("Updated\n"))
+    })
 
     for {
         select {
-        case ev := <-watcher.Event:
+        case ev := <-self.watcher.Event:
 
             if ev.Mask & inotify.IN_MODIFY != 0 {
-                backend.Modified(ev.Name)
+                self.backend.Modified(ev.Name)
 
             } else if ev.Mask & inotify.IN_CREATE != 0 {
-                if ev.Mask & inotify.IN_ISDIR != 0 && backend.ShouldWatch(ev.Name) {
+
+                if ev.Mask & inotify.IN_ISDIR != 0 &&
+                   self.backend.ShouldWatch(ev.Name) {
+
                     fmt.Println("Added watch", ev.Name)
-                    watcher.AddWatch(ev.Name, INTERESTING)
+                    self.watcher.AddWatch(ev.Name, INTERESTING)
                 }
-                backend.Created(ev.Name)
+                self.backend.Created(ev.Name)
 
             } else if ev.Mask & inotify.IN_DELETE != 0 {
-                backend.Deleted(ev.Name)
+                self.backend.Deleted(ev.Name)
             }
 
-        case err := <-watcher.Error:
+        case err := <-self.watcher.Error:
             fmt.Println("error:", err)
         }
     }
 }
 
-// Add inotify watches on dir and all sub-dirs
-func addWatches(
-    watcher *inotify.Watcher,
-    rootDir string,
-    backend ChangeAgent) {
+// Add inotify watches on rootDir and all sub-dirs
+func (self *Client) addWatches() {
 
     addSingleWatch := func(path string, info os.FileInfo, err error) error {
-        if info.IsDir() && backend.ShouldWatch(path) {
+        if info.IsDir() && self.backend.ShouldWatch(path) {
             fmt.Println("Watching", path)
-            watcher.AddWatch(path, INTERESTING)
+            self.watcher.AddWatch(path, INTERESTING)
         }
         return nil
     }
 
-    err := filepath.Walk(rootDir, addSingleWatch)
+    err := filepath.Walk(self.rootDir, addSingleWatch)
     if err != nil {
         log.Fatal(err)
     }

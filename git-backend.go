@@ -18,14 +18,21 @@ const (
 
 type GitBackend struct {
     RootDir string
+
     commitLock sync.Mutex
     isCommitPending bool
+
     pushLock sync.Mutex
     isPushPending bool
+
+    pushHook func()
+
+    isPullActive bool   // Is a pull currently running - ignore all events
 }
 
+// A file or directory has been created
 func (self *GitBackend) Created(filename string) {
-    if self.isGit(filename) {
+    if self.isGit(filename) || self.isPullActive {
         return
     }
     fmt.Println("GitBackend created:", filename)
@@ -34,16 +41,18 @@ func (self *GitBackend) Created(filename string) {
     go self.commitLater()
 }
 
+// A file has been modified
 func (self *GitBackend) Modified(filename string) {
-    if self.isGit(filename) {
+    if self.isGit(filename) || self.isPullActive{
         return
     }
     fmt.Println("GitBackend modified:", filename, "in", self.RootDir)
     go self.commitLater()
 }
 
+// A file has been deleted
 func (self *GitBackend) Deleted(filename string) {
-    if self.isGit(filename) {
+    if self.isGit(filename) || self.isPullActive{
         return
     }
     fmt.Println("GitBackend deleted:", filename)
@@ -51,6 +60,16 @@ func (self *GitBackend) Deleted(filename string) {
     relPart, _ := filepath.Rel(self.RootDir, filename)
     self.git("rm", relPart)
     go self.commitLater()
+}
+
+// Fetch data from remote
+func (self *GitBackend) Fetch() {
+    self.pull()
+}
+
+// Register the function to be called after we push to remote
+func (self *GitBackend) RegisterPushHook(callback func()) {
+    self.pushHook = callback
 }
 
 // Should the inotify watch watch the given path
@@ -109,6 +128,14 @@ func (self *GitBackend) pushLater() {
 // Run: git push
 func (self *GitBackend) push() {
     self.git("push")
+    self.pushHook()
+}
+
+// Run: git pull
+func (self *GitBackend) pull() {
+    self.isPullActive = true
+    self.git("pull")
+    self.isPullActive = false
 }
 
 func (self *GitBackend) git(gitCmd string, args ...string) {

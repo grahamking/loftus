@@ -8,9 +8,10 @@ import (
 )
 
 /* Create and start a server */
-func start_server(addr string) {
+func startServer(addr string) {
 
     server := Server{addr: addr}
+    log.Println("Listening on", addr)
     server.listen()
 }
 
@@ -30,6 +31,7 @@ func (self *Server) listen() {
 
     for {
         conn, err := listener.Accept()
+        log.Println("New connection")
         if err != nil {
             log.Fatal("Error on accept: " + err.Error())
         }
@@ -60,6 +62,7 @@ func (self *Server) handle(conn net.Conn) {
             return
         }
 
+        log.Println("Echoing: ", content)
         for _, outConn := range self.connections {
             if outConn != conn {
                 outConn.Write([]byte(content))
