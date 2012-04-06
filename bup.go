@@ -7,6 +7,7 @@ import (
     "strings"
     "net"
     "bufio"
+    "time"
     "exp/inotify"
     "path/filepath"
 )
@@ -48,7 +49,10 @@ func startClient() {
 
     client := Client{rootDir: rootDir, backend: backend, watcher: watcher}
     client.addWatches()
-    fmt.Println("Watching:", rootDir)
+    log.Println("Watching:", rootDir)
+
+    // Always start with a fetch to bring us up to date
+    backend.Fetch()
 
     go client.listenRemote()
     client.run()
@@ -65,24 +69,44 @@ type Client struct {
 // new data from remote (the backend does that for us)
 func (self *Client) listenRemote() {
 
-    conn, err := net.Dial("tcp", ADDR)
-    if err != nil {
-        log.Fatal("Error connection to remote server")
-    }
-    self.remote = conn
-    defer self.remote.Close()
-
-	bufRead := bufio.NewReader(self.remote)
     for {
-		content, err := bufRead.ReadString('\n')
-        if err != nil {
-            log.Fatal("Remote read error")
-        }
-        fmt.Println("Remote sent: " + content)
+        self.remote = getRemoteConnection()
+        defer self.remote.Close()
+        log.Println("Connected to remote")
 
-        self.backend.Fetch()
+        bufRead := bufio.NewReader(self.remote)
+        for {
+            content, err := bufRead.ReadString('\n')
+            if err != nil {
+                log.Println("Remote read error - re-connecting")
+                self.remote.Close()
+                break
+            }
+            log.Println("Remote sent: " + content)
+
+            self.backend.Fetch()
+        }
     }
 }
+
+// Get a connection to remote server which tells us when to pull
+func getRemoteConnection() net.Conn {
+
+    var conn net.Conn
+    var err error
+    for {
+        conn, err = net.Dial("tcp", ADDR)
+        if err == nil {
+            break
+        }
+        time.Sleep(10 * time.Second)
+    }
+    return conn
+}
+
+// Connect
+// Read
+// if err break
 
 func (self *Client) run() {
 
@@ -102,7 +126,7 @@ func (self *Client) run() {
                 if ev.Mask & inotify.IN_ISDIR != 0 &&
                    self.backend.ShouldWatch(ev.Name) {
 
-                    fmt.Println("Added watch", ev.Name)
+                    log.Println("Added watch", ev.Name)
                     self.watcher.AddWatch(ev.Name, INTERESTING)
                 }
                 self.backend.Created(ev.Name)
@@ -112,7 +136,7 @@ func (self *Client) run() {
             }
 
         case err := <-self.watcher.Error:
-            fmt.Println("error:", err)
+            log.Println("error:", err)
         }
     }
 }
@@ -122,7 +146,7 @@ func (self *Client) addWatches() {
 
     addSingleWatch := func(path string, info os.FileInfo, err error) error {
         if info.IsDir() && self.backend.ShouldWatch(path) {
-            fmt.Println("Watching", path)
+            log.Println("Watching", path)
             self.watcher.AddWatch(path, INTERESTING)
         }
         return nil
