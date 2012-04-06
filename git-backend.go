@@ -1,6 +1,7 @@
 package main
 
 import (
+    "os"
     "log"
     "fmt"
     "strings"
@@ -11,13 +12,15 @@ import (
 )
 
 const (
-    GIT_BIN = "/usr/bin/git"
     COMMIT_PAUSE = 2
     PUSH_PAUSE = 10
 )
 
 type GitBackend struct {
-    RootDir string
+    logger *log.Logger
+    gitPath string
+
+    rootDir string
 
     commitLock sync.Mutex
     isCommitPending bool
@@ -30,13 +33,40 @@ type GitBackend struct {
     isPullActive bool   // Is a pull currently running - ignore all events
 }
 
+func NewGitBackend(rootDir string, logDir string) *GitBackend {
+
+    logger := openLog(logDir)
+
+    gitPath, err := exec.LookPath("git")
+    if err != nil {
+        log.Fatal("Error looking for 'git' on path. ", err)
+    }
+
+    return &GitBackend{
+        logger: logger,
+        rootDir: rootDir,
+        gitPath: gitPath}
+}
+
+func openLog(logDir string) *log.Logger {
+
+    writer, err := os.OpenFile(
+        logDir + "git.log", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
+
+    if err != nil {
+        log.Fatal("Error opening log file git.log in ", logDir, err)
+    }
+
+    return log.New(writer, "", log.LstdFlags)
+}
+
 // A file or directory has been created
 func (self *GitBackend) Created(filename string) {
     if self.isGit(filename) || self.isPullActive {
         return
     }
     fmt.Println("GitBackend created:", filename)
-    relPart, _ := filepath.Rel(self.RootDir, filename)
+    relPart, _ := filepath.Rel(self.rootDir, filename)
     self.git("add", relPart)
     go self.commitLater()
 }
@@ -46,7 +76,7 @@ func (self *GitBackend) Modified(filename string) {
     if self.isGit(filename) || self.isPullActive{
         return
     }
-    fmt.Println("GitBackend modified:", filename, "in", self.RootDir)
+    fmt.Println("GitBackend modified:", filename, "in", self.rootDir)
     go self.commitLater()
 }
 
@@ -57,7 +87,7 @@ func (self *GitBackend) Deleted(filename string) {
     }
     fmt.Println("GitBackend deleted:", filename)
 
-    relPart, _ := filepath.Rel(self.RootDir, filename)
+    relPart, _ := filepath.Rel(self.rootDir, filename)
     self.git("rm", relPart)
     go self.commitLater()
 }
@@ -140,12 +170,13 @@ func (self *GitBackend) pull() {
 
 func (self *GitBackend) git(gitCmd string, args ...string) {
 
-    cmd := exec.Command(GIT_BIN, append([]string{gitCmd}, args...)...)
-    cmd.Dir = self.RootDir
+    cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
+    cmd.Dir = self.rootDir
+    self.logger.Println(cmd)
 
     output, err := cmd.CombinedOutput()
     if err != nil {
-        log.Println(err)
+        self.logger.Println(err)
     }
-    fmt.Println(string(output))
+    self.logger.Println(string(output))
 }

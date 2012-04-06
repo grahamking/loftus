@@ -1,20 +1,19 @@
 package main
 
 import (
-    "fmt"
     "os"
     "log"
     "strings"
     "net"
     "bufio"
     "time"
+    "flag"
     "exp/inotify"
     "path/filepath"
 )
 
 const (
     INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE
-    ADDR = "127.0.0.1:8007"
 )
 
 type ChangeAgent interface {
@@ -28,33 +27,63 @@ type ChangeAgent interface {
 
 func main() {
 
-    if len(os.Args) != 2 {
-        fmt.Println("USAGE: bup <dir_to_sync|--server>")
-        os.Exit(1)
-    }
+    config := confFromFlags()
 
-    if os.Args[1] == "--server" {
-        startServer(ADDR)
+    os.Mkdir(config.logDir, 0750)
+    os.Mkdir(config.syncDir, 0750)
+
+    if config.isServer {
+        startServer(config.serverAddr)
     } else {
-        startClient()
+        startClient(config.syncDir, config.logDir, config.serverAddr)
     }
 }
 
-// Watch directories, called sync methods on backend, etc
-func startClient() {
+type Config struct {
+    isServer bool
+    serverAddr string
+    syncDir string
+    logDir string
+}
 
-    rootDir := strings.TrimRight(os.Args[1], "/")
-    backend := &GitBackend{RootDir: rootDir}
+// Parse commands line flags in to a configuration object
+func confFromFlags() *Config {
+
+    defaultSync := os.Getenv("HOME") + "/bup/"
+    var syncDir = flag.String("dir", defaultSync, "Synchronise this directory. Must already be a git repo with a remote (i.e. 'git pull' works)")
+
+    var isServer = flag.Bool("server", false, "Be the server")
+    var serverAddr = flag.String("address", "127.0.0.1:8007", "address:post where server is listening")
+
+    defaultLog := os.Getenv("HOME") + "/.bup/"
+    var logDir = flag.String("log", defaultLog, "Log directory")
+
+    flag.Parse()
+
+    return &Config{
+        isServer: *isServer,
+        serverAddr: *serverAddr,
+        syncDir: *syncDir,
+        logDir: *logDir}
+}
+
+// Watch directories, called sync methods on backend, etc
+func startClient(syncDir string, logDir string, serverAddr string) {
+
+    log.Println("Synchronising: ", syncDir)
+
+    syncDir = strings.TrimRight(syncDir, "/")
+    backend := NewGitBackend(syncDir, logDir)
+
     watcher, _ := inotify.NewWatcher()
 
-    client := Client{rootDir: rootDir, backend: backend, watcher: watcher}
+    client := Client{rootDir: syncDir, backend: backend, watcher: watcher}
     client.addWatches()
-    log.Println("Watching:", rootDir)
 
     // Always start with a fetch to bring us up to date
     backend.Fetch()
 
-    go client.listenRemote()
+    go client.listenRemote(serverAddr)
     client.run()
 }
 
@@ -67,10 +96,10 @@ type Client struct {
 
 // Connect to server and listen for messages, which mean we have to fetch
 // new data from remote (the backend does that for us)
-func (self *Client) listenRemote() {
+func (self *Client) listenRemote(serverAddr string) {
 
     for {
-        self.remote = getRemoteConnection()
+        self.remote = getRemoteConnection(serverAddr)
         defer self.remote.Close()
         log.Println("Connected to remote")
 
@@ -90,12 +119,12 @@ func (self *Client) listenRemote() {
 }
 
 // Get a connection to remote server which tells us when to pull
-func getRemoteConnection() net.Conn {
+func getRemoteConnection(serverAddr string) net.Conn {
 
     var conn net.Conn
     var err error
     for {
-        conn, err = net.Dial("tcp", ADDR)
+        conn, err = net.Dial("tcp", serverAddr)
         if err == nil {
             break
         }
