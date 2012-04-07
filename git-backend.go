@@ -3,16 +3,14 @@ package main
 import (
     "os"
     "log"
-    "fmt"
     "strings"
     "os/exec"
-    "path/filepath"
     "time"
     "sync"
 )
 
 const (
-    COMMIT_PAUSE = 2
+    SYNC_PAUSE = 2
     PUSH_PAUSE = 10
 )
 
@@ -22,8 +20,8 @@ type GitBackend struct {
 
     rootDir string
 
-    commitLock sync.Mutex
-    isCommitPending bool
+    syncLock sync.Mutex
+    isSyncPending bool
 
     pushLock sync.Mutex
     isPushPending bool
@@ -62,39 +60,36 @@ func openLog(logDir string) *log.Logger {
 
 // A file or directory has been created
 func (self *GitBackend) Created(filename string) {
-    if self.isGit(filename) || self.isPullActive {
-        return
-    }
-    fmt.Println("GitBackend created:", filename)
-    relPart, _ := filepath.Rel(self.rootDir, filename)
-    self.git("add", relPart)
-    go self.commitLater()
+    self.action(filename)
 }
 
 // A file has been modified
 func (self *GitBackend) Modified(filename string) {
-    if self.isGit(filename) || self.isPullActive{
-        return
-    }
-    fmt.Println("GitBackend modified:", filename, "in", self.rootDir)
-    go self.commitLater()
+    self.action(filename)
 }
 
 // A file has been deleted
 func (self *GitBackend) Deleted(filename string) {
-    if self.isGit(filename) || self.isPullActive{
+    self.action(filename)
+}
+
+// An inotify event
+func (self *GitBackend) action(filename string) {
+    if self.isGit(filename) || self.isPullActive {
         return
     }
-    fmt.Println("GitBackend deleted:", filename)
-
-    relPart, _ := filepath.Rel(self.rootDir, filename)
-    self.git("rm", relPart)
-    go self.commitLater()
+    go self.syncLater()
 }
 
 // Fetch data from remote
 func (self *GitBackend) Fetch() {
     self.pull()
+}
+
+// Run: git add --all ; git commit --all
+func (self *GitBackend) Sync() {
+    self.git("add", "--all")
+    self.git("commit", "--all", "--message=bup")
 }
 
 // Register the function to be called after we push to remote
@@ -112,29 +107,24 @@ func (self *GitBackend) isGit(filename string) bool {
     return strings.Contains(filename, ".git")
 }
 
-// Schedule a commit for in a few seconds
-func (self *GitBackend) commitLater() {
+// Schedule a synchronise for in a few seconds
+func (self *GitBackend) syncLater() {
 
     // ensure only once per time - might be able to use sync.Once instead (?)
-    self.commitLock.Lock()
-    if self.isCommitPending {
-        self.commitLock.Unlock()
+    self.syncLock.Lock()
+    if self.isSyncPending {
+        self.syncLock.Unlock()
         return
     }
-    self.isCommitPending = true
-    self.commitLock.Unlock()
+    self.isSyncPending = true
+    self.syncLock.Unlock()
 
-    time.Sleep(COMMIT_PAUSE * time.Second)
-    self.commit()
+    time.Sleep(SYNC_PAUSE * time.Second)
+    self.Sync()
 
     go self.pushLater()
 
-    self.isCommitPending = false
-}
-
-// Run: git commit --all
-func (self *GitBackend) commit() {
-    self.git("commit", "--all", "--message=bup")
+    self.isSyncPending = false
 }
 
 // Schedule a push for later

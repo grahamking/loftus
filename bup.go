@@ -22,6 +22,7 @@ type ChangeAgent interface {
     Deleted(filename string)
     ShouldWatch(filename string) bool
     Fetch()
+    Sync()
     RegisterPushHook(func())
 }
 
@@ -80,7 +81,8 @@ func startClient(syncDir string, logDir string, serverAddr string) {
     client := Client{rootDir: syncDir, backend: backend, watcher: watcher}
     client.addWatches()
 
-    // Always start with a fetch to bring us up to date
+    // Always start with a sync and fetch to bring us up to date
+    backend.Sync()
     backend.Fetch()
 
     go client.listenRemote(serverAddr)
@@ -133,19 +135,19 @@ func getRemoteConnection(serverAddr string) net.Conn {
     return conn
 }
 
-// Connect
-// Read
-// if err break
-
 func (self *Client) run() {
 
     self.backend.RegisterPushHook(func() {
-        self.remote.Write([]byte("Updated\n"))
+        if self.remote != nil {
+            self.remote.Write([]byte("Updated\n"))
+        }
     })
 
     for {
         select {
         case ev := <-self.watcher.Event:
+
+            log.Println(ev)
 
             if ev.Mask & inotify.IN_MODIFY != 0 {
                 self.backend.Modified(ev.Name)
