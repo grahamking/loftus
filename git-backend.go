@@ -90,6 +90,7 @@ func (self *GitBackend) Fetch() {
 func (self *GitBackend) Sync() {
     self.git("add", "--all")
     self.git("commit", "--all", "--message=bup")
+    go self.pushLater()
 }
 
 // Register the function to be called after we push to remote
@@ -121,8 +122,6 @@ func (self *GitBackend) syncLater() {
 
     time.Sleep(SYNC_PAUSE * time.Second)
     self.Sync()
-
-    go self.pushLater()
 
     self.isSyncPending = false
 }
