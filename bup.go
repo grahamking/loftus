@@ -13,31 +13,14 @@ import (
 )
 
 const (
-    INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE
+    INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
 )
 
 type ChangeAgent interface {
-    Created(filename string)
-    Modified(filename string)
-    Deleted(filename string)
-    ShouldWatch(filename string) bool
-    Fetch()
     Sync()
+    Changed(filename string)
+    ShouldWatch(filename string) bool
     RegisterPushHook(func())
-}
-
-func main() {
-
-    config := confFromFlags()
-
-    os.Mkdir(config.logDir, 0750)
-    os.Mkdir(config.syncDir, 0750)
-
-    if config.isServer {
-        startServer(config.serverAddr)
-    } else {
-        startClient(config.syncDir, config.logDir, config.serverAddr)
-    }
 }
 
 type Config struct {
@@ -45,6 +28,47 @@ type Config struct {
     serverAddr string
     syncDir string
     logDir string
+    stdout bool
+}
+
+type Client struct {
+    backend ChangeAgent
+    rootDir string
+    watcher *inotify.Watcher
+    remote net.Conn
+    logger *log.Logger
+}
+
+func main() {
+
+    config := confFromFlags()
+    logDir := config.logDir
+    log.Println("Logging to ", logDir)
+
+    os.Mkdir(config.logDir, 0750)
+    os.Mkdir(config.syncDir, 0750)
+
+    if config.isServer {
+        startServer(config)
+    } else {
+        startClient(config)
+    }
+}
+
+func openLog(config *Config, name string) *log.Logger {
+
+    if config.stdout {
+        return log.New(os.Stdout, "", log.LstdFlags)
+    }
+
+    writer, err := os.OpenFile(
+        config.logDir + name, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
+
+    if err != nil {
+        log.Fatal("Error opening log file", name, " in ", config.logDir, err)
+    }
+
+    return log.New(writer, "", log.LstdFlags)
 }
 
 // Parse commands line flags in to a configuration object
@@ -59,41 +83,45 @@ func confFromFlags() *Config {
     defaultLog := os.Getenv("HOME") + "/.bup/"
     var logDir = flag.String("log", defaultLog, "Log directory")
 
+    var stdout = flag.Bool("stdout", false, "Log to stdout")
+
     flag.Parse()
 
     return &Config{
         isServer: *isServer,
         serverAddr: *serverAddr,
         syncDir: *syncDir,
-        logDir: *logDir}
+        logDir: *logDir,
+        stdout: *stdout}
 }
 
 // Watch directories, called sync methods on backend, etc
-func startClient(syncDir string, logDir string, serverAddr string) {
+func startClient(config *Config) {
 
-    log.Println("Synchronising: ", syncDir)
+    syncDir := config.syncDir
+
+    logger := openLog(config, "client.log")
+
+    logger.Println("Synchronising: ", syncDir)
 
     syncDir = strings.TrimRight(syncDir, "/")
-    backend := NewGitBackend(syncDir, logDir)
+    backend := NewGitBackend(config)
 
     watcher, _ := inotify.NewWatcher()
 
-    client := Client{rootDir: syncDir, backend: backend, watcher: watcher}
+    client := Client{
+        rootDir: syncDir,
+        backend: backend,
+        watcher: watcher,
+        logger: logger,
+    }
     client.addWatches()
 
-    // Always start with a sync and fetch to bring us up to date
+    // Always start with a sync to bring us up to date
     backend.Sync()
-    backend.Fetch()
 
-    go client.listenRemote(serverAddr)
+    go client.listenRemote(config.serverAddr)
     client.run()
-}
-
-type Client struct {
-    backend ChangeAgent
-    rootDir string
-    watcher *inotify.Watcher
-    remote net.Conn
 }
 
 // Connect to server and listen for messages, which mean we have to fetch
@@ -103,19 +131,19 @@ func (self *Client) listenRemote(serverAddr string) {
     for {
         self.remote = getRemoteConnection(serverAddr)
         defer self.remote.Close()
-        log.Println("Connected to remote")
+        self.logger.Println("Connected to remote")
 
         bufRead := bufio.NewReader(self.remote)
         for {
             content, err := bufRead.ReadString('\n')
             if err != nil {
-                log.Println("Remote read error - re-connecting")
+                self.logger.Println("Remote read error - re-connecting")
                 self.remote.Close()
                 break
             }
-            log.Println("Remote sent: " + content)
+            self.logger.Println("Remote sent: " + content)
 
-            self.backend.Fetch()
+            self.backend.Sync()
         }
     }
 }
@@ -147,27 +175,20 @@ func (self *Client) run() {
         select {
         case ev := <-self.watcher.Event:
 
-            log.Println(ev)
+            self.logger.Println(ev)
 
-            if ev.Mask & inotify.IN_MODIFY != 0 {
-                self.backend.Modified(ev.Name)
+            isCreate := ev.Mask & inotify.IN_CREATE != 0
+            isDir := ev.Mask & inotify.IN_ISDIR != 0
 
-            } else if ev.Mask & inotify.IN_CREATE != 0 {
-
-                if ev.Mask & inotify.IN_ISDIR != 0 &&
-                   self.backend.ShouldWatch(ev.Name) {
-
-                    log.Println("Added watch", ev.Name)
-                    self.watcher.AddWatch(ev.Name, INTERESTING)
-                }
-                self.backend.Created(ev.Name)
-
-            } else if ev.Mask & inotify.IN_DELETE != 0 {
-                self.backend.Deleted(ev.Name)
+            if isCreate && isDir && self.backend.ShouldWatch(ev.Name) {
+                self.logger.Println("Adding watch", ev.Name)
+                self.watcher.AddWatch(ev.Name, INTERESTING)
             }
 
+            self.backend.Changed(ev.Name)
+
         case err := <-self.watcher.Error:
-            log.Println("error:", err)
+            self.logger.Println("error:", err)
         }
     }
 }
@@ -177,7 +198,7 @@ func (self *Client) addWatches() {
 
     addSingleWatch := func(path string, info os.FileInfo, err error) error {
         if info.IsDir() && self.backend.ShouldWatch(path) {
-            log.Println("Watching", path)
+            self.logger.Println("Watching", path)
             self.watcher.AddWatch(path, INTERESTING)
         }
         return nil
@@ -185,6 +206,6 @@ func (self *Client) addWatches() {
 
     err := filepath.Walk(self.rootDir, addSingleWatch)
     if err != nil {
-        log.Fatal(err)
+        self.logger.Fatal(err)
     }
 }

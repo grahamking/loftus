@@ -8,8 +8,9 @@ import (
 )
 
 /* Create and start a server */
-func startServer(addr string) {
+func startServer(config *Config) {
 
+    addr := config.serverAddr
     server := Server{addr: addr}
     log.Println("Listening on", addr)
     server.listen()

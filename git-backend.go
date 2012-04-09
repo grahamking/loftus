@@ -1,7 +1,6 @@
 package main
 
 import (
-    "os"
     "log"
     "strings"
     "os/exec"
@@ -31,66 +30,43 @@ type GitBackend struct {
     isPullActive bool   // Is a pull currently running - ignore all events
 }
 
-func NewGitBackend(rootDir string, logDir string) *GitBackend {
+func NewGitBackend(config *Config) *GitBackend {
 
-    logger := openLog(logDir)
+    rootDir := config.syncDir
+    logger := openLog(config, "git.log")
 
     gitPath, err := exec.LookPath("git")
     if err != nil {
-        log.Fatal("Error looking for 'git' on path. ", err)
+        logger.Fatal("Error looking for 'git' on path. ", err)
     }
 
     return &GitBackend{
         logger: logger,
         rootDir: rootDir,
-        gitPath: gitPath}
-}
-
-func openLog(logDir string) *log.Logger {
-
-    writer, err := os.OpenFile(
-        logDir + "git.log", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
-
-    if err != nil {
-        log.Fatal("Error opening log file git.log in ", logDir, err)
+        gitPath: gitPath,
     }
-
-    return log.New(writer, "", log.LstdFlags)
 }
 
 // A file or directory has been created
-func (self *GitBackend) Created(filename string) {
-    self.action(filename)
-}
-
-// A file has been modified
-func (self *GitBackend) Modified(filename string) {
-    self.action(filename)
-}
-
-// A file has been deleted
-func (self *GitBackend) Deleted(filename string) {
-    self.action(filename)
-}
-
-// An inotify event
-func (self *GitBackend) action(filename string) {
+func (self *GitBackend) Changed(filename string) {
     if self.isGit(filename) || self.isPullActive {
         return
     }
     go self.syncLater()
 }
 
-// Fetch data from remote
-func (self *GitBackend) Fetch() {
-    self.pull()
-}
-
 // Run: git add --all ; git commit --all
 func (self *GitBackend) Sync() {
+
+    // Pull first to ensure a fast-forward when we push
+    self.pull()
+
     self.git("add", "--all")
-    self.git("commit", "--all", "--message=bup")
-    go self.pushLater()
+    isSuccess := self.git("commit", "--all", "--message=bup")
+
+    if isSuccess {
+        go self.pushLater()
+    }
 }
 
 // Register the function to be called after we push to remote
@@ -146,8 +122,10 @@ func (self *GitBackend) pushLater() {
 
 // Run: git push
 func (self *GitBackend) push() {
-    self.git("push")
-    self.pushHook()
+    isSuccess := self.git("push")
+    if isSuccess {
+        self.pushHook()
+    }
 }
 
 // Run: git pull
@@ -157,15 +135,23 @@ func (self *GitBackend) pull() {
     self.isPullActive = false
 }
 
-func (self *GitBackend) git(gitCmd string, args ...string) {
+/* Runs a git command, returns true if success, false if err
+   false does not mean a bad error, for example a "commit" that
+   didn't have to do anything is a "false" here.
+*/
+func (self *GitBackend) git(gitCmd string, args ...string) bool {
 
     cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
     cmd.Dir = self.rootDir
     self.logger.Println(cmd)
 
     output, err := cmd.CombinedOutput()
+    self.logger.Println(string(output))
+
     if err != nil {
         self.logger.Println(err)
+        return false
     }
-    self.logger.Println(string(output))
+
+    return true
 }
