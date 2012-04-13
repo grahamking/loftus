@@ -4,9 +4,6 @@ import (
     "os"
     "log"
     "strings"
-    "net"
-    "bufio"
-    "time"
     "flag"
     "exp/inotify"
     "path/filepath"
@@ -16,7 +13,7 @@ const (
     INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
 )
 
-type ChangeAgent interface {
+type Backend interface {
     Sync()
     Changed(filename string)
     ShouldWatch(filename string) bool
@@ -25,6 +22,7 @@ type ChangeAgent interface {
 
 type Config struct {
     isServer bool
+    isCheck bool
     serverAddr string
     syncDir string
     logDir string
@@ -32,11 +30,11 @@ type Config struct {
 }
 
 type Client struct {
-    backend ChangeAgent
+    backend Backend
     rootDir string
     watcher *inotify.Watcher
-    remote net.Conn
     logger *log.Logger
+    incoming chan string
 }
 
 func main() {
@@ -48,37 +46,33 @@ func main() {
     os.Mkdir(config.logDir, 0750)
     os.Mkdir(config.syncDir, 0750)
 
-    if config.isServer {
+    if config.isCheck {
+        runCheck(config)
+
+    } else if config.isServer {
         startServer(config)
+
     } else {
         startClient(config)
     }
-}
-
-func openLog(config *Config, name string) *log.Logger {
-
-    if config.stdout {
-        return log.New(os.Stdout, "", log.LstdFlags)
-    }
-
-    writer, err := os.OpenFile(
-        config.logDir + name, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
-
-    if err != nil {
-        log.Fatal("Error opening log file", name, " in ", config.logDir, err)
-    }
-
-    return log.New(writer, "", log.LstdFlags)
 }
 
 // Parse commands line flags in to a configuration object
 func confFromFlags() *Config {
 
     defaultSync := os.Getenv("HOME") + "/bup/"
-    var syncDir = flag.String("dir", defaultSync, "Synchronise this directory. Must already be a git repo with a remote (i.e. 'git pull' works)")
+    var syncDir = flag.String(
+        "dir",
+        defaultSync,
+        "Synchronise this directory. Must already be a git repo with a remote (i.e. 'git pull' works)")
 
     var isServer = flag.Bool("server", false, "Be the server")
-    var serverAddr = flag.String("address", "127.0.0.1:8007", "address:post where server is listening")
+    var serverAddr = flag.String(
+        "address",
+        "127.0.0.1:8007",
+        "address:post where server is listening")
+
+    var isCheck = flag.Bool("check", false, "Check we are setup correctly")
 
     defaultLog := os.Getenv("HOME") + "/.bup/"
     var logDir = flag.String("log", defaultLog, "Log directory")
@@ -89,6 +83,7 @@ func confFromFlags() *Config {
 
     return &Config{
         isServer: *isServer,
+        isCheck: *isCheck,
         serverAddr: *serverAddr,
         syncDir: *syncDir,
         logDir: *logDir,
@@ -109,66 +104,51 @@ func startClient(config *Config) {
 
     watcher, _ := inotify.NewWatcher()
 
+    incomingChannel := make(chan string)
+
     client := Client{
         rootDir: syncDir,
         backend: backend,
         watcher: watcher,
         logger: logger,
+        incoming: incomingChannel,
     }
     client.addWatches()
 
     // Always start with a sync to bring us up to date
     backend.Sync()
 
-    go client.listenRemote(config.serverAddr)
+    go udpListen(logger, incomingChannel)
+    go tcpListen(logger, config.serverAddr, incomingChannel)
     client.run()
 }
 
-// Connect to server and listen for messages, which mean we have to fetch
-// new data from remote (the backend does that for us)
-func (self *Client) listenRemote(serverAddr string) {
+func openLog(config *Config, name string) *log.Logger {
 
-    for {
-        self.remote = getRemoteConnection(serverAddr)
-        defer self.remote.Close()
-        self.logger.Println("Connected to remote")
-
-        bufRead := bufio.NewReader(self.remote)
-        for {
-            content, err := bufRead.ReadString('\n')
-            if err != nil {
-                self.logger.Println("Remote read error - re-connecting")
-                self.remote.Close()
-                break
-            }
-            self.logger.Println("Remote sent: " + content)
-
-            self.backend.Sync()
-        }
+    if config.stdout {
+        return log.New(os.Stdout, "", log.LstdFlags)
     }
+
+    writer, err := os.OpenFile(
+        config.logDir + name, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
+
+    if err != nil {
+        log.Fatal("Error opening log file", name, " in ", config.logDir, err)
+    }
+
+    return log.New(writer, "", log.LstdFlags)
 }
 
-// Get a connection to remote server which tells us when to pull
-func getRemoteConnection(serverAddr string) net.Conn {
-
-    var conn net.Conn
-    var err error
-    for {
-        conn, err = net.Dial("tcp", serverAddr)
-        if err == nil {
-            break
-        }
-        time.Sleep(10 * time.Second)
-    }
-    return conn
-}
-
+// Main loop
 func (self *Client) run() {
 
+    // push hook will be called from a go routine
     self.backend.RegisterPushHook(func() {
-        if self.remote != nil {
-            self.remote.Write([]byte("Updated\n"))
+        msg := "Updated\n"
+        if remoteConn != nil { // remoteConn is global in comms.go
+            tcpSend(remoteConn, msg)
         }
+        udpSend(self.logger, msg)
     })
 
     for {
@@ -189,7 +169,12 @@ func (self *Client) run() {
 
         case err := <-self.watcher.Error:
             self.logger.Println("error:", err)
+
+        case <-self.incoming:
+            self.logger.Println("Remote update notification")
+            self.backend.Sync()
         }
+
     }
 }
 

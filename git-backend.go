@@ -62,9 +62,9 @@ func (self *GitBackend) Sync() {
     self.pull()
 
     self.git("add", "--all")
-    isSuccess := self.git("commit", "--all", "--message=bup")
+    err := self.git("commit", "--all", "--message=bup")
 
-    if isSuccess {
+    if err == nil {
         go self.pushLater()
     }
 }
@@ -121,25 +121,27 @@ func (self *GitBackend) pushLater() {
 }
 
 // Run: git push
-func (self *GitBackend) push() {
-    isSuccess := self.git("push")
-    if isSuccess {
-        self.pushHook()
+func (self *GitBackend) push() error {
+    err := self.git("push")
+    if err == nil && self.pushHook != nil {
+        go self.pushHook()
     }
+    return err
 }
 
 // Run: git pull
-func (self *GitBackend) pull() {
+func (self *GitBackend) pull() error {
     self.isPullActive = true
-    self.git("pull")
+    err := self.git("pull")
     self.isPullActive = false
+    return err
 }
 
-/* Runs a git command, returns true if success, false if err
-   false does not mean a bad error, for example a "commit" that
-   didn't have to do anything is a "false" here.
+/* Runs a git command, returns nil if success, error if err
+   Errors are not always bad. For example a "commit" that
+   didn't have to do anything returns an error.
 */
-func (self *GitBackend) git(gitCmd string, args ...string) bool {
+func (self *GitBackend) git(gitCmd string, args ...string) error {
 
     cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
     cmd.Dir = self.rootDir
@@ -150,8 +152,8 @@ func (self *GitBackend) git(gitCmd string, args ...string) bool {
 
     if err != nil {
         self.logger.Println(err)
-        return false
+        return err
     }
 
-    return true
+    return nil
 }
