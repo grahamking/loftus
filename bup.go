@@ -16,6 +16,7 @@ const (
 
 type Backend interface {
 	Sync() error
+    Status() (created []string, modified []string, deleted []string)
 	Changed(filename string)
 	ShouldWatch(filename string) bool
 	RegisterPushHook(func())
@@ -197,6 +198,12 @@ func (self *Client) addWatches() {
 	if err != nil {
 		self.logger.Fatal(err)
 	}
+}
+
+// Utility function to inform user about something - for example file changes
+func Info(msg string) {
+	cmd := exec.Command("bup_info", msg)
+	cmd.Run()
 }
 
 // Utility function to warn user about something - for example a git error

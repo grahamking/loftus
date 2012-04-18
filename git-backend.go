@@ -7,6 +7,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+    "strconv"
 )
 
 const (
@@ -72,6 +73,8 @@ func (self *GitBackend) Sync() error {
 		return err
 	}
 
+    self.displayStatus()
+
 	err = self.git("commit", "--all", "--message=bup")
 	if err != nil {
 		return err
@@ -82,6 +85,35 @@ func (self *GitBackend) Sync() error {
 	return nil
 }
 
+//Display summary of changes
+func (self *GitBackend) displayStatus() {
+
+    created, modified, deleted := self.Status()
+
+    var msg string
+    if len(created) == 1 {
+        msg += "New: " + created[0]
+    } else if len(created) > 1 {
+        msg += "New: " + strconv.Itoa(len(created))
+    }
+
+    if len(modified) == 1 {
+        msg += " Edit: " + modified[0]
+    } else if len(modified) > 1 {
+        msg += " Edit: " + strconv.Itoa(len(modified))
+    }
+
+    if len(deleted) == 1 {
+        msg += " Del: " + deleted[0]
+    } else if len(deleted) > 1 {
+        msg += " Del: " + strconv.Itoa(len(deleted))
+    }
+
+    if len(msg) != 0 {
+        Info(msg)
+    }
+}
+
 // Register the function to be called after we push to remote
 func (self *GitBackend) RegisterPushHook(callback func()) {
 	self.pushHook = callback
@@ -90,6 +122,51 @@ func (self *GitBackend) RegisterPushHook(callback func()) {
 // Should the inotify watch watch the given path
 func (self *GitBackend) ShouldWatch(filename string) bool {
 	return !self.isGit(filename)
+}
+
+// Status of directory. Returns filenames created, modified or deleted.
+func (self *GitBackend) Status() (created []string, modified []string, deleted []string) {
+
+	cmd := exec.Command(self.gitPath, "status", "--porcelain")
+	cmd.Dir = self.rootDir
+
+	output, err := cmd.CombinedOutput()
+    if err != nil {
+        self.logger.Println(err)
+    }
+
+    for _, line := range strings.Split(string(output), "\n") {
+        if len(line) == 0 {
+            continue
+        }
+
+        lineParts := strings.Split(line, " ")
+
+        status := lineParts[0]
+        var filename string
+        if len(lineParts) == 2 {
+            filename = lineParts[1]
+        } else if len(lineParts) == 3 {
+            filename = lineParts[2]
+        }
+
+        switch status[0] {
+            case 'A':
+                created = append(created, filename)
+            case 'M':
+                modified = append(modified, filename)
+            case 'R':                         // Renamed, but count as Modified
+                modified = append(modified, filename)
+            case 'D':
+                deleted = append(deleted, filename)
+            case '?':
+                self.logger.Println("Unknown. Need git add", filename)
+            default:
+                self.logger.Println("Other", status)
+        }
+    }
+
+    return created, modified, deleted
 }
 
 // Is filename inside a .git directory?
