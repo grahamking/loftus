@@ -215,7 +215,7 @@ func (self *GitBackend) pushLater() {
 
 // Run: git push
 func (self *GitBackend) push() *GitError {
-	err := self.git("push", "origin", "master")
+	err := self.git("push")
 	if err == nil && self.pushHook != nil {
 		go self.pushHook()
 	}
@@ -225,7 +225,7 @@ func (self *GitBackend) push() *GitError {
 // Run: git pull
 func (self *GitBackend) pull() *GitError {
 	self.isPullActive = true
-	err := self.git("pull", "origin", "master")
+	err := self.git("pull")
 	self.isPullActive = false
 	return err
 }
