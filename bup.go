@@ -16,7 +16,6 @@ const (
 
 type Backend interface {
 	Sync() error
-    Status() (created []string, modified []string, deleted []string)
 	Changed(filename string)
 	ShouldWatch(filename string) bool
 	RegisterPushHook(func())

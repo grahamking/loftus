@@ -73,7 +73,7 @@ func (self *GitBackend) Sync() error {
 		return err
 	}
 
-    self.displayStatus()
+    self.displayStatus("status", "--porcelain")
 
 	err = self.git("commit", "--all", "--message=bup")
 	if err != nil {
@@ -86,9 +86,9 @@ func (self *GitBackend) Sync() error {
 }
 
 //Display summary of changes
-func (self *GitBackend) displayStatus() {
+func (self *GitBackend) displayStatus(args ...string) {
 
-    created, modified, deleted := self.Status()
+    created, modified, deleted := self.status(args...)
 
     var msg string
     if len(created) == 1 {
@@ -125,9 +125,10 @@ func (self *GitBackend) ShouldWatch(filename string) bool {
 }
 
 // Status of directory. Returns filenames created, modified or deleted.
-func (self *GitBackend) Status() (created []string, modified []string, deleted []string) {
+func (self *GitBackend) status(args ...string) (created []string, modified []string, deleted []string) {
 
-	cmd := exec.Command(self.gitPath, "status", "--porcelain")
+	cmd := exec.Command(self.gitPath, args...)
+
 	cmd.Dir = self.rootDir
 
 	output, err := cmd.CombinedOutput()
@@ -224,8 +225,19 @@ func (self *GitBackend) push() *GitError {
 
 // Run: git pull
 func (self *GitBackend) pull() *GitError {
+    var err *GitError
 	self.isPullActive = true
-	err := self.git("pull")
+
+    err = self.git("fetch")
+    if err != nil {
+	    self.isPullActive = false
+        return nil
+    }
+
+    self.displayStatus("diff", "origin/master", "--name-status")
+
+	err = self.git("merge", "origin/master")
+
 	self.isPullActive = false
 	return err
 }
