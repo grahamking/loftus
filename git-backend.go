@@ -54,32 +54,43 @@ func (self *GitBackend) Changed(filename string) {
 	if self.isGit(filename) || self.isPullActive {
 		return
 	}
+    self.logger.Println("File changed, calling syncLater:", filename)
 	go self.syncLater()
 }
 
 // Run: git add --all ; git commit --all
 func (self *GitBackend) Sync() error {
 
+    self.logger.Println("Sync start")
+
 	var err *GitError
 
 	// Pull first to ensure a fast-forward when we push
+    self.logger.Println("pull")
 	err = self.pull()
+    self.logger.Println(err)
 	if err != nil {
 		return err
 	}
 
+    self.logger.Println("add")
 	err = self.git("add", "--all")
+    self.logger.Println(err)
 	if err != nil {
 		return err
 	}
 
+    self.logger.Println("displayStatus")
     self.displayStatus("status", "--porcelain")
 
+    self.logger.Println("commit")
 	err = self.git("commit", "--all", "--message=bup")
+    self.logger.Println(err)
 	if err != nil {
 		return err
 	}
 
+    self.logger.Println("pushLater and done")
 	go self.pushLater()
 
 	return nil
@@ -128,6 +139,7 @@ func (self *GitBackend) ShouldWatch(filename string) bool {
 func (self *GitBackend) status(args ...string) (created []string, modified []string, deleted []string) {
 
 	cmd := exec.Command(self.gitPath, args...)
+    self.logger.Println(cmd)
 
 	cmd.Dir = self.rootDir
 
@@ -135,28 +147,28 @@ func (self *GitBackend) status(args ...string) (created []string, modified []str
     if err != nil {
         self.logger.Println(err)
     }
+    self.logger.Println(string(output))
 
     for _, line := range strings.Split(string(output), "\n") {
         if len(line) == 0 {
             continue
         }
 
+        // Replace double spaces and tabs with single space so that Split is predictable
+        line = strings.Replace(line, "  ", " ", -1)
+        line = strings.Replace(line, "\t", " ", -1)
+
         lineParts := strings.Split(line, " ")
 
         status := lineParts[0]
-        var filename string
-        if len(lineParts) == 2 {
-            filename = lineParts[1]
-        } else if len(lineParts) == 3 {
-            filename = lineParts[2]
-        }
+        filename := lineParts[1]
 
         switch status[0] {
             case 'A':
                 created = append(created, filename)
             case 'M':
                 modified = append(modified, filename)
-            case 'R':                         // Renamed, but count as Modified
+            case 'R':                         // Renamed, but treat as Modified
                 modified = append(modified, filename)
             case 'D':
                 deleted = append(deleted, filename)
@@ -188,6 +200,7 @@ func (self *GitBackend) syncLater() {
 	self.syncLock.Unlock()
 
 	time.Sleep(SYNC_PAUSE * time.Second)
+    self.logger.Println("syncLater initiated sync")
 	self.Sync()
 
 	self.isSyncPending = false
@@ -225,18 +238,26 @@ func (self *GitBackend) push() *GitError {
 
 // Run: git pull
 func (self *GitBackend) pull() *GitError {
+
+    self.logger.Println("pull start")
+
     var err *GitError
 	self.isPullActive = true
 
+    self.logger.Println("fetch")
     err = self.git("fetch")
+    self.logger.Println(err)
     if err != nil {
 	    self.isPullActive = false
         return nil
     }
 
+    self.logger.Println("diff")
     self.displayStatus("diff", "origin/master", "--name-status")
 
+    self.logger.Println("merge")
 	err = self.git("merge", "origin/master")
+    self.logger.Println(err)
 
 	self.isPullActive = false
 	return err
