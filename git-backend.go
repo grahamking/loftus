@@ -60,7 +60,7 @@ func (self *GitBackend) Changed(filename string) {
 // Run: git add --all ; git commit --all
 func (self *GitBackend) Sync() error {
 
-	var err error
+	var err *GitError
 
 	// Pull first to ensure a fast-forward when we push
 	err = self.pull()
@@ -214,7 +214,7 @@ func (self *GitBackend) pushLater() {
 }
 
 // Run: git push
-func (self *GitBackend) push() error {
+func (self *GitBackend) push() *GitError {
 	err := self.git("push")
 	if err == nil && self.pushHook != nil {
 		go self.pushHook()
@@ -223,7 +223,7 @@ func (self *GitBackend) push() error {
 }
 
 // Run: git pull
-func (self *GitBackend) pull() error {
+func (self *GitBackend) pull() *GitError {
 	self.isPullActive = true
 	err := self.git("pull")
 	self.isPullActive = false
@@ -234,7 +234,7 @@ func (self *GitBackend) pull() error {
    Errors are not always bad. For example a "commit" that
    didn't have to do anything returns an error.
 */
-func (self *GitBackend) git(gitCmd string, args ...string) error {
+func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
 
 	cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
 	cmd.Dir = self.rootDir
@@ -243,26 +243,27 @@ func (self *GitBackend) git(gitCmd string, args ...string) error {
 	output, err := cmd.CombinedOutput()
 	self.logger.Println(string(output))
 
-	if err != nil {
+	if err == nil {
+        return nil
+    }
 
-		exitStatus := err.(*exec.ExitError).Sys().(syscall.WaitStatus).ExitStatus()
-		if exitStatus != 1 {
-			self.logger.Println(err)
-			gitErr := &GitError{
-                cmd: strings.Join(cmd.Args, " "),
-                internalError: err,
-                output: string(output)}
-			return gitErr
-		}
-	}
-
-	return nil
+    exitStatus := err.(*exec.ExitError).Sys().(syscall.WaitStatus).ExitStatus()
+    gitErr := &GitError{
+        cmd: strings.Join(cmd.Args, " "),
+        internalError: err,
+        output: string(output),
+        status: exitStatus}
+    if exitStatus != 1 {            // 1 means command had nothing to do
+        self.logger.Println(err)
+    }
+    return gitErr
 }
 
 type GitError struct {
 	cmd           string
 	internalError error
 	output        string
+    status        int
 }
 
 // error implementation which displays git info

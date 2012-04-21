@@ -10,15 +10,18 @@ import (
 /* Create and start a server */
 func startServer(config *Config) {
 
+	logger := openLog(config, "server.log")
+
     addr := config.serverAddr
-    server := Server{addr: addr}
-    log.Println("Listening on", addr)
+    server := Server{addr: addr, logger: logger}
+    logger.Println("Listening on", addr)
     server.listen()
 }
 
 type Server struct {
     connections []net.Conn
     addr string
+    logger *log.Logger
 }
 
 // Listen for new connections
@@ -26,15 +29,15 @@ func (self *Server) listen() {
 
     listener, err := net.Listen("tcp", self.addr)
     if err != nil {
-        log.Fatal("Error on listen: " + err.Error())
+        self.logger.Fatal("Error on listen: " + err.Error())
     }
     defer listener.Close()
 
     for {
         conn, err := listener.Accept()
-        log.Println("New connection")
+        self.logger.Println("New connection")
         if err != nil {
-            log.Fatal("Error on accept: " + err.Error())
+            self.logger.Fatal("Error on accept: " + err.Error())
         }
 
         self.connections = append(self.connections, conn)
@@ -63,7 +66,7 @@ func (self *Server) handle(conn net.Conn) {
             return
         }
 
-        log.Println("Echoing: ", content)
+        self.logger.Println("Echoing: ", content)
         for _, outConn := range self.connections {
             if outConn != conn {
                 outConn.Write([]byte(content))

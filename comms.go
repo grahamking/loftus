@@ -21,6 +21,7 @@ func udpSend(logger *log.Logger, msg string) {
     defer sock.Close()
 
     sock.Write([]byte(msg))
+    logger.Println("UDP broadcast sent")
 }
 
 // Listen for UDP broadcast message on port 51234,
@@ -36,6 +37,7 @@ func udpListen(logger *log.Logger, channel chan string) {
     for {
         buf := make([]byte, 1024)
         listener.ReadFrom(buf)
+        logger.Println("UDP msg received:", string(buf))
         channel <- string(buf)
     }
 

@@ -42,11 +42,9 @@ type Client struct {
 func main() {
 
 	config := confFromFlags()
-	logDir := config.logDir
-	log.Println("Logging to ", logDir)
+	log.Println("Logging to ", config.logDir)
 
 	os.Mkdir(config.logDir, 0750)
-	os.Mkdir(config.syncDir, 0750)
 
 	if config.isCheck {
 		runCheck(config)
@@ -55,6 +53,8 @@ func main() {
 		startServer(config)
 
 	} else {
+        // No point making the sync dir, it needs to be a repo
+	    //os.Mkdir(config.syncDir, 0750)
 		startClient(config)
 	}
 }
@@ -119,7 +119,7 @@ func startClient(config *Config) {
 
 	// Always start with a sync to bring us up to date
 	err := backend.Sync()
-	if err != nil {
+	if err != nil && err.(*GitError).status != 1 {
 		Warn(err.Error())
 	}
 
