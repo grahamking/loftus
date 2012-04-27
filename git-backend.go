@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	SYNC_PAUSE = 2
-	PUSH_PAUSE = 10
+	SYNC_IDLE_SECS = 5
 )
 
 type GitBackend struct {
@@ -24,8 +23,7 @@ type GitBackend struct {
 	syncLock      sync.Mutex
 	isSyncPending bool
 
-	pushLock      sync.Mutex
-	isPushPending bool
+    lastEvent time.Time
 
 	pushHook func()
 
@@ -55,44 +53,44 @@ func (self *GitBackend) Changed(filename string) {
 		return
 	}
     self.logger.Println("File changed, calling syncLater:", filename)
+    self.lastEvent = time.Now()
 	go self.syncLater()
 }
 
-// Run: git add --all ; git commit --all
+// Run: git pull; git add --all ; git commit --all; git push
 func (self *GitBackend) Sync() error {
 
-    self.logger.Println("Sync start")
+    self.logger.Println("* Sync start")
 
 	var err *GitError
 
 	// Pull first to ensure a fast-forward when we push
-    self.logger.Println("pull")
 	err = self.pull()
-    self.logger.Println(err)
 	if err != nil {
 		return err
 	}
 
-    self.logger.Println("add")
 	err = self.git("add", "--all")
-    self.logger.Println(err)
 	if err != nil {
 		return err
 	}
 
-    self.logger.Println("displayStatus")
     self.displayStatus("status", "--porcelain")
 
-    self.logger.Println("commit")
 	err = self.git("commit", "--all", "--message=bup")
-    self.logger.Println(err)
 	if err != nil {
+        // An err with status==1 means nothing to commit,
+        // that counts as a clean exit
+        self.logger.Println("* Sync end")
 		return err
 	}
 
-    self.logger.Println("pushLater and done")
-	go self.pushLater()
+	err = self.push()
+	if err != nil {
+        return err
+	}
 
+    self.logger.Println("* Sync end")
 	return nil
 }
 
@@ -139,7 +137,7 @@ func (self *GitBackend) ShouldWatch(filename string) bool {
 func (self *GitBackend) status(args ...string) (created []string, modified []string, deleted []string) {
 
 	cmd := exec.Command(self.gitPath, args...)
-    self.logger.Println(cmd)
+	self.logger.Println(strings.Join(cmd.Args, " "))
 
 	cmd.Dir = self.rootDir
 
@@ -147,7 +145,9 @@ func (self *GitBackend) status(args ...string) (created []string, modified []str
     if err != nil {
         self.logger.Println(err)
     }
-    self.logger.Println(string(output))
+    if len(output) > 0 {
+        self.logger.Println(string(output))
+    }
 
     for _, line := range strings.Split(string(output), "\n") {
         if len(line) == 0 {
@@ -187,7 +187,7 @@ func (self *GitBackend) isGit(filename string) bool {
 	return strings.Contains(filename, ".git")
 }
 
-// Schedule a synchronise for in a few seconds
+// Schedule a synchronise for in a few seconds. Run it in go routine.
 func (self *GitBackend) syncLater() {
 
 	// ensure only once per time - might be able to use sync.Once instead (?)
@@ -199,32 +199,14 @@ func (self *GitBackend) syncLater() {
 	self.isSyncPending = true
 	self.syncLock.Unlock()
 
-	time.Sleep(SYNC_PAUSE * time.Second)
+    for time.Now().Sub(self.lastEvent) < (SYNC_IDLE_SECS * time.Second) {
+        time.Sleep(time.Second)
+    }
+
     self.logger.Println("syncLater initiated sync")
 	self.Sync()
 
 	self.isSyncPending = false
-}
-
-// Schedule a push for later
-func (self *GitBackend) pushLater() {
-
-	// ensure only once per time - might be able to use sync.Once instead (?)
-	self.pushLock.Lock()
-	if self.isPushPending {
-		self.pushLock.Unlock()
-		return
-	}
-	self.isPushPending = true
-	self.pushLock.Unlock()
-
-	time.Sleep(PUSH_PAUSE * time.Second)
-	err := self.push()
-	if err != nil {
-		Warn(err.Error())
-	}
-
-	self.isPushPending = false
 }
 
 // Run: git push
@@ -239,26 +221,18 @@ func (self *GitBackend) push() *GitError {
 // Run: git pull
 func (self *GitBackend) pull() *GitError {
 
-    self.logger.Println("pull start")
-
     var err *GitError
 	self.isPullActive = true
 
-    self.logger.Println("fetch")
     err = self.git("fetch")
-    self.logger.Println(err)
     if err != nil {
 	    self.isPullActive = false
-        return nil
+        return err
     }
 
-    self.logger.Println("diff")
     self.displayStatus("diff", "origin/master", "--name-status")
 
-    self.logger.Println("merge")
 	err = self.git("merge", "origin/master")
-    self.logger.Println(err)
-
 	self.isPullActive = false
 	return err
 }
@@ -271,10 +245,12 @@ func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
 
 	cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
 	cmd.Dir = self.rootDir
-	self.logger.Println(cmd)
+	self.logger.Println(strings.Join(cmd.Args, " "))
 
 	output, err := cmd.CombinedOutput()
-	self.logger.Println(string(output))
+    if len(output) > 0 {
+        self.logger.Println(string(output))
+    }
 
 	if err == nil {
         return nil

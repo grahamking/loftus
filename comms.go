@@ -7,12 +7,17 @@ import (
     "bufio"
 )
 
+var isIgnoreNext = false
+
 /*
  * Sync over local subnet, by UDP broadcast
  */
 
 // Send a udp broadcast message on port 51234
 func udpSend(logger *log.Logger, msg string) {
+
+    // Ignore the next UDP message, because it comes from us
+    isIgnoreNext = true
 
     sock, err := net.Dial("udp", "255.255.255.255:51234")
     if err != nil {
@@ -37,6 +42,10 @@ func udpListen(logger *log.Logger, channel chan string) {
     for {
         buf := make([]byte, 1024)
         listener.ReadFrom(buf)
+        if isIgnoreNext {
+            isIgnoreNext = false
+            continue
+        }
         logger.Println("UDP msg received:", string(buf))
         channel <- string(buf)
     }

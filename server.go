@@ -68,7 +68,9 @@ func (self *Server) handle(conn net.Conn) {
 
         self.logger.Println("Echoing: ", content)
         for _, outConn := range self.connections {
+            self.logger.Println("Comparing", outConn, "and", conn)
             if outConn != conn {
+                self.logger.Println("different, echoing")
                 outConn.Write([]byte(content))
             }
         }
