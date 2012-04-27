@@ -22,12 +22,11 @@ type GitBackend struct {
 
 	syncLock      sync.Mutex
 	isSyncPending bool
+    isSyncActive bool   // Ignore all events during sync
 
     lastEvent time.Time
 
 	pushHook func()
-
-	isPullActive bool // Is a pull currently running - ignore all events
 }
 
 func NewGitBackend(config *Config) *GitBackend {
@@ -49,7 +48,8 @@ func NewGitBackend(config *Config) *GitBackend {
 
 // A file or directory has been created
 func (self *GitBackend) Changed(filename string) {
-	if self.isGit(filename) || self.isPullActive {
+	if self.isGit(filename) || self.isSyncActive {
+        self.logger.Println("Sync active. Ignore Changed event")
 		return
 	}
     self.logger.Println("File changed, calling syncLater:", filename)
@@ -61,17 +61,20 @@ func (self *GitBackend) Changed(filename string) {
 func (self *GitBackend) Sync() error {
 
     self.logger.Println("* Sync start")
+    self.isSyncActive = true
 
 	var err *GitError
 
 	// Pull first to ensure a fast-forward when we push
 	err = self.pull()
 	if err != nil {
+        self.isSyncActive = false
 		return err
 	}
 
 	err = self.git("add", "--all")
 	if err != nil {
+        self.isSyncActive = false
 		return err
 	}
 
@@ -81,15 +84,18 @@ func (self *GitBackend) Sync() error {
 	if err != nil {
         // An err with status==1 means nothing to commit,
         // that counts as a clean exit
+        self.isSyncActive = false
         self.logger.Println("* Sync end")
 		return err
 	}
 
 	err = self.push()
 	if err != nil {
+        self.isSyncActive = false
         return err
 	}
 
+    self.isSyncActive = false
     self.logger.Println("* Sync end")
 	return nil
 }
@@ -222,18 +228,14 @@ func (self *GitBackend) push() *GitError {
 func (self *GitBackend) pull() *GitError {
 
     var err *GitError
-	self.isPullActive = true
 
     err = self.git("fetch")
     if err != nil {
-	    self.isPullActive = false
         return err
     }
 
     self.displayStatus("diff", "origin/master", "--name-status")
-
 	err = self.git("merge", "origin/master")
-	self.isPullActive = false
 	return err
 }
 
