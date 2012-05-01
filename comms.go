@@ -14,28 +14,28 @@ var isIgnoreNext = false
  */
 
 // Send a udp broadcast message on port 51234
-func udpSend(logger *log.Logger, msg string) {
+func udpSend(msg string) {
 
     // Ignore the next UDP message, because it comes from us
     isIgnoreNext = true
 
     sock, err := net.Dial("udp", "255.255.255.255:51234")
     if err != nil {
-        logger.Fatal(err)
+        log.Fatal(err)
     }
     defer sock.Close()
 
     sock.Write([]byte(msg))
-    logger.Println("UDP broadcast sent")
+    log.Println("UDP broadcast sent")
 }
 
 // Listen for UDP broadcast message on port 51234,
 // and put them on the channel. Run it in a go routine.
-func udpListen(logger *log.Logger, channel chan string) {
+func udpListen(channel chan string) {
 
     listener, err := net.ListenPacket("udp", "255.255.255.255:51234")
     if err != nil {
-        logger.Fatal(err)
+        log.Fatal(err)
     }
     defer listener.Close()
 
@@ -46,7 +46,7 @@ func udpListen(logger *log.Logger, channel chan string) {
             isIgnoreNext = false
             continue
         }
-        logger.Println("UDP msg received:", string(buf))
+        log.Println("UDP msg received:", string(buf))
         channel <- string(buf)
     }
 
@@ -60,23 +60,23 @@ func udpListen(logger *log.Logger, channel chan string) {
 var remoteConn net.Conn
 
 // Listen for messages from the server. Auto-reconnect.
-func tcpListen(logger *log.Logger, serverAddr string, channel chan string) {
+func tcpListen(serverAddr string, channel chan string) {
 
     for {   // Loop for auto-reconnect
         remoteConn = getRemoteConnection(serverAddr, true)
         defer remoteConn.Close()
-        logger.Println("Connected to remote")
+        log.Println("Connected to remote")
 
         bufRead := bufio.NewReader(remoteConn)
 
         for {   // Connection work loop
             content, err := bufRead.ReadString('\n')
             if err != nil {
-                logger.Println("Remote read error - re-connecting")
+                log.Println("Remote read error - re-connecting")
                 remoteConn.Close()
                 break
             }
-            logger.Println("Remote sent: " + content)
+            log.Println("Remote sent: " + content)
 
             channel <- content
         }

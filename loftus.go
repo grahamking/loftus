@@ -36,7 +36,6 @@ type Client struct {
 	backend  Backend
 	rootDir  string
 	watcher  *inotify.Watcher
-	logger   *log.Logger
 	incoming chan string
 }
 
@@ -98,9 +97,11 @@ func startClient(config *Config) {
 
 	syncDir := config.syncDir
 
-	logger := openLog(config, "client.log")
+    if ! config.stdout {
+        logTo(config.logDir + "loftus.log")
+    }
 
-	logger.Println("Synchronising: ", syncDir)
+	log.Println("Synchronising: ", syncDir)
 
 	syncDir = strings.TrimRight(syncDir, "/")
 	backend := NewGitBackend(config)
@@ -113,7 +114,6 @@ func startClient(config *Config) {
 		rootDir:  syncDir,
 		backend:  backend,
 		watcher:  watcher,
-		logger:   logger,
 		incoming: incomingChannel,
 	}
 	client.addWatches()
@@ -124,25 +124,22 @@ func startClient(config *Config) {
 		Warn(err.Error())
 	}
 
-	go udpListen(logger, incomingChannel)
-	go tcpListen(logger, config.serverAddr, incomingChannel)
+	go udpListen(incomingChannel)
+	go tcpListen(config.serverAddr, incomingChannel)
 	client.run()
 }
 
-func openLog(config *Config, name string) *log.Logger {
-
-	if config.stdout {
-		return log.New(os.Stdout, "", log.LstdFlags)
-	}
+// Set log output to given fullpath
+func logTo(fullpath string) {
 
 	writer, err := os.OpenFile(
-		config.logDir+name, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
+		fullpath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
 
 	if err != nil {
-		log.Fatal("Error opening log file", name, " in ", config.logDir, err)
+		log.Fatal("Error opening log file", fullpath, err)
 	}
 
-	return log.New(writer, "", log.LstdFlags)
+    log.SetOutput(writer)
 }
 
 // Main loop
@@ -154,30 +151,30 @@ func (self *Client) run() {
 		if remoteConn != nil { // remoteConn is global in comms.go
 			tcpSend(remoteConn, msg)
 		}
-		udpSend(self.logger, msg)
+		udpSend(msg)
 	})
 
 	for {
 		select {
 		case ev := <-self.watcher.Event:
 
-			self.logger.Println(ev)
+			log.Println(ev)
 
 			isCreate := ev.Mask&inotify.IN_CREATE != 0
 			isDir := ev.Mask&inotify.IN_ISDIR != 0
 
 			if isCreate && isDir && self.backend.ShouldWatch(ev.Name) {
-				self.logger.Println("Adding watch", ev.Name)
+				log.Println("Adding watch", ev.Name)
 				self.watcher.AddWatch(ev.Name, INTERESTING)
 			}
 
 			self.backend.Changed(ev.Name)
 
 		case err := <-self.watcher.Error:
-			self.logger.Println("error:", err)
+			log.Println("error:", err)
 
 		case <-self.incoming:
-			self.logger.Println("Remote update notification")
+			log.Println("Remote update notification")
 			self.backend.Sync()
 		}
 
@@ -189,7 +186,7 @@ func (self *Client) addWatches() {
 
 	addSingleWatch := func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() && self.backend.ShouldWatch(path) {
-			self.logger.Println("Watching", path)
+			log.Println("Watching", path)
 			self.watcher.AddWatch(path, INTERESTING)
 		}
 		return nil
@@ -197,7 +194,7 @@ func (self *Client) addWatches() {
 
 	err := filepath.Walk(self.rootDir, addSingleWatch)
 	if err != nil {
-		self.logger.Fatal(err)
+		log.Fatal(err)
 	}
 }
 

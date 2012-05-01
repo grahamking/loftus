@@ -15,7 +15,6 @@ const (
 )
 
 type GitBackend struct {
-	logger  *log.Logger
 	gitPath string
 
 	rootDir string
@@ -32,18 +31,13 @@ type GitBackend struct {
 func NewGitBackend(config *Config) *GitBackend {
 
 	rootDir := config.syncDir
-	logger := openLog(config, "git.log")
 
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
-		logger.Fatal("Error looking for 'git' on path. ", err)
+		log.Fatal("Error looking for 'git' on path. ", err)
 	}
 
-	return &GitBackend{
-		logger:  logger,
-		rootDir: rootDir,
-		gitPath: gitPath,
-	}
+	return &GitBackend{rootDir: rootDir, gitPath: gitPath}
 }
 
 // A file or directory has been created
@@ -58,7 +52,7 @@ func (self *GitBackend) Changed(filename string) {
 // Run: git pull; git add --all ; git commit --all; git push
 func (self *GitBackend) Sync() error {
 
-    self.logger.Println("* Sync start")
+    log.Println("* Sync start")
     self.isSyncActive = true
 
 	var err *GitError
@@ -83,7 +77,7 @@ func (self *GitBackend) Sync() error {
         // An err with status==1 means nothing to commit,
         // that counts as a clean exit
         self.isSyncActive = false
-        self.logger.Println("* Sync end")
+        log.Println("* Sync end")
 		return err
 	}
 
@@ -94,7 +88,7 @@ func (self *GitBackend) Sync() error {
 	}
 
     self.isSyncActive = false
-    self.logger.Println("* Sync end")
+    log.Println("* Sync end")
 	return nil
 }
 
@@ -141,16 +135,16 @@ func (self *GitBackend) ShouldWatch(filename string) bool {
 func (self *GitBackend) status(args ...string) (created []string, modified []string, deleted []string) {
 
 	cmd := exec.Command(self.gitPath, args...)
-	self.logger.Println(strings.Join(cmd.Args, " "))
+	log.Println(strings.Join(cmd.Args, " "))
 
 	cmd.Dir = self.rootDir
 
 	output, err := cmd.CombinedOutput()
     if err != nil {
-        self.logger.Println(err)
+        log.Println(err)
     }
     if len(output) > 0 {
-        self.logger.Println(string(output))
+        log.Println(string(output))
     }
 
     for _, line := range strings.Split(string(output), "\n") {
@@ -177,9 +171,9 @@ func (self *GitBackend) status(args ...string) (created []string, modified []str
             case 'D':
                 deleted = append(deleted, filename)
             case '?':
-                self.logger.Println("Unknown. Need git add", filename)
+                log.Println("Unknown. Need git add", filename)
             default:
-                self.logger.Println("Other", status)
+                log.Println("Other", status)
         }
     }
 
@@ -207,7 +201,7 @@ func (self *GitBackend) syncLater() {
         time.Sleep(time.Second)
     }
 
-    self.logger.Println("syncLater initiated sync")
+    log.Println("syncLater initiated sync")
 	self.Sync()
 
 	self.isSyncPending = false
@@ -245,11 +239,11 @@ func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
 
 	cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
 	cmd.Dir = self.rootDir
-	self.logger.Println(strings.Join(cmd.Args, " "))
+	log.Println(strings.Join(cmd.Args, " "))
 
 	output, err := cmd.CombinedOutput()
     if len(output) > 0 {
-        self.logger.Println(string(output))
+        log.Println(string(output))
     }
 
 	if err == nil {
@@ -263,7 +257,7 @@ func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
         output: string(output),
         status: exitStatus}
     if exitStatus != 1 {            // 1 means command had nothing to do
-        self.logger.Println(err)
+        log.Println(err)
     }
     return gitErr
 }
