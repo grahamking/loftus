@@ -45,6 +45,9 @@ func main() {
 	log.Println("Logging to ", config.logDir)
 
 	os.Mkdir(config.logDir, 0750)
+    if ! config.stdout {
+        logTo(config.logDir + "loftus.log")
+    }
 
 	if config.isCheck {
 		runCheck(config)
@@ -53,8 +56,6 @@ func main() {
 		startServer(config)
 
 	} else {
-		// No point making the sync dir, it needs to be a repo
-		//os.Mkdir(config.syncDir, 0750)
 		startClient(config)
 	}
 }
@@ -96,11 +97,6 @@ func confFromFlags() *Config {
 func startClient(config *Config) {
 
 	syncDir := config.syncDir
-
-    if ! config.stdout {
-        logTo(config.logDir + "loftus.log")
-    }
-
 	log.Println("Synchronising: ", syncDir)
 
 	syncDir = strings.TrimRight(syncDir, "/")
