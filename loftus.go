@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
+	INTERESTING      = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
+	DEFAULT_SYNC_DIR = "/loftus/"
+	DEFAULT_LOG_DIR  = "/.loftus/"
 )
 
 type Backend interface {
@@ -52,8 +54,8 @@ func main() {
 		startServer(config)
 
 	} else {
-        // No point making the sync dir, it needs to be a repo
-	    //os.Mkdir(config.syncDir, 0750)
+		// No point making the sync dir, it needs to be a repo
+		//os.Mkdir(config.syncDir, 0750)
 		startClient(config)
 	}
 }
@@ -61,7 +63,7 @@ func main() {
 // Parse commands line flags in to a configuration object
 func confFromFlags() *Config {
 
-	defaultSync := os.Getenv("HOME") + "/bup/"
+	defaultSync := os.Getenv("HOME") + DEFAULT_SYNC_DIR
 	var syncDir = flag.String(
 		"dir",
 		defaultSync,
@@ -75,7 +77,7 @@ func confFromFlags() *Config {
 
 	var isCheck = flag.Bool("check", false, "Check we are setup correctly")
 
-	defaultLog := os.Getenv("HOME") + "/.bup/"
+	defaultLog := os.Getenv("HOME") + DEFAULT_LOG_DIR
 	var logDir = flag.String("log", defaultLog, "Log directory")
 
 	var stdout = flag.Bool("stdout", false, "Log to stdout")
@@ -169,7 +171,7 @@ func (self *Client) run() {
 				self.watcher.AddWatch(ev.Name, INTERESTING)
 			}
 
-            self.logger.Println("Calling Changed")
+			self.logger.Println("Calling Changed")
 			self.backend.Changed(ev.Name)
 
 		case err := <-self.watcher.Error:
@@ -202,12 +204,12 @@ func (self *Client) addWatches() {
 
 // Utility function to inform user about something - for example file changes
 func Info(msg string) {
-	cmd := exec.Command("bup_info", msg)
+	cmd := exec.Command("loftus_info", msg)
 	cmd.Run()
 }
 
 // Utility function to warn user about something - for example a git error
 func Warn(msg string) {
-	cmd := exec.Command("bup_alert", msg)
+	cmd := exec.Command("loftus_alert", msg)
 	cmd.Run()
 }

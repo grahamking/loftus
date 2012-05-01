@@ -80,7 +80,7 @@ func (self *GitBackend) Sync() error {
 
     self.displayStatus("status", "--porcelain")
 
-	err = self.git("commit", "--all", "--message=bup")
+	err = self.git("commit", "--all", "--message=loftus")
 	if err != nil {
         // An err with status==1 means nothing to commit,
         // that counts as a clean exit
