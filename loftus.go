@@ -171,7 +171,6 @@ func (self *Client) run() {
 				self.watcher.AddWatch(ev.Name, INTERESTING)
 			}
 
-			self.logger.Println("Calling Changed")
 			self.backend.Changed(ev.Name)
 
 		case err := <-self.watcher.Error:

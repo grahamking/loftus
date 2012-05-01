@@ -49,10 +49,8 @@ func NewGitBackend(config *Config) *GitBackend {
 // A file or directory has been created
 func (self *GitBackend) Changed(filename string) {
 	if self.isGit(filename) || self.isSyncActive {
-        self.logger.Println("Sync active. Ignore Changed event")
 		return
 	}
-    self.logger.Println("File changed, calling syncLater:", filename)
     self.lastEvent = time.Now()
 	go self.syncLater()
 }
