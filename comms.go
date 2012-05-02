@@ -65,7 +65,7 @@ func tcpListen(serverAddr string, channel chan string) {
     for {   // Loop for auto-reconnect
         remoteConn = getRemoteConnection(serverAddr, true)
         defer remoteConn.Close()
-        log.Println("Connected to remote")
+        Info("Connected to remote sync server")
 
         bufRead := bufio.NewReader(remoteConn)
 
