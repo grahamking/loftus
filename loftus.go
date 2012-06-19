@@ -1,7 +1,6 @@
 package main
 
 import (
-	"exp/inotify"
 	"flag"
 	"log"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
     "fmt"
+	"loftus/inotify"
 )
 
 const (
