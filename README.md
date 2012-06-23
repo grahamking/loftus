@@ -1,5 +1,7 @@
 
-Attempt to store my dotfiles etc in a git repo, and make a Go daemon that manages it for me, using inotify. NOT READY YET.
+Attempt to store my dotfiles etc in a git repo, and make a Go daemon that manages it for me, using inotify.
+
+NOT READY YET.
 
 ## Working Notes
 
@@ -18,26 +20,46 @@ Probably a sigkill - trap it and run two git commands.
 **How to start it?**
 Need to get ssh key password from user.
 Maybe run from window manager startup apps, not as daemon.
+Need solid ssh-agent setup.
 Too many retries triggers denyhosts to lock me out!
+
+**Other option is loftus specific user, ssh key with no passphrase**
+
+On server:
+
+    sudo adduser loftus --shell /usr/bin/git-shell --disable-password
+    mkdir /home/loftus/.ssh
+
+On client:
+
+    ssh-keygen -f ~/.ssh/id_rsa.loftus    # Do not add a passphrase - just hit enter
+    scp ~/.ssh/id_rsa.loftus.pub /home/loftus/.ssh/authorized_keys
+    Edit .ssh/config to include something like:
+
+        Host loftus_server
+            HostName my.example.com
+            User loftus
+            IdentityFile ~/.ssh/id_rsa.loftus
 
 ## Setup
 
 Server:
 
+    cd /home/loftus/
     mkdir repo.git ; cd repo
     git init --bare .
-    /usr/local/bup --server --address=daisy.gkgk.org:8007
+    /usr/local/bin/loftus --server --address=daisy.gkgk.org:8007
 
 Client:
 
     git init .                       # Create local repo
     git remote add origin ssh://...  # Declare where master is
-                                    # ssh://graham@server.example.com/~graham/repo.git
+                                     # ssh://loftus@server.example.com/~loftus/repo.git
     git pull origin master           # Fill directory
     git push -u origin master        # So that bare "git pull" works
-    /usr/local/bup --address=daisy.gkgk.org:8007
+    /usr/local/loftus --address=daisy.gkgk.org:8007
 
 Client alternative (isn't this better than above?)
 
-    git clone ssh://username@example.com/~/loftus.git
+    git clone ssh://loftus_server/~/loftus.git    # See .ssh/config earlier
 
