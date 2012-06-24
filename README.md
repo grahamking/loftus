@@ -27,13 +27,14 @@ Too many retries triggers denyhosts to lock me out!
 
 On server:
 
-    sudo adduser loftus --shell /usr/bin/git-shell --disable-password
-    mkdir /home/loftus/.ssh
+    sudo adduser loftus --shell /usr/bin/git-shell --disabled-password
+    sudo mkdir --mode=777 /home/loftus/.ssh
 
 On client:
 
     ssh-keygen -f ~/.ssh/id_rsa.loftus    # Do not add a passphrase - just hit enter
-    scp ~/.ssh/id_rsa.loftus.pub /home/loftus/.ssh/authorized_keys
+    scp ~/.ssh/id_rsa.loftus.pub my.example.com:/home/loftus/.ssh/authorized_keys
+
     Edit .ssh/config to include something like:
 
         Host loftus_server
@@ -41,9 +42,13 @@ On client:
             User loftus
             IdentityFile ~/.ssh/id_rsa.loftus
 
+On server:
+    sudo chmod -R 500 ~loftus/.ssh
+    sudo chown -R loftus:loftus ~loftus/.ssh
+
 ## Setup
 
-Server:
+Server (as user loftus):    # but loftus has no shell!?
 
     cd /home/loftus/
     mkdir repo.git ; cd repo
