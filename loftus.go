@@ -20,8 +20,8 @@ const (
     CMD_ALERT = "loftus_alert"
     CMD_INFO = "loftus_info"
 
-    SUGGEST_CMD_ALERT = "#!/bin/bash\nzenity --warning --title='loftus' --text='$1'"
-    SUGGEST_CMD_INFO = "#!/bin/bash\nnotify-send loftus '$1'"
+    SUGGEST_CMD_ALERT = "#!/bin/bash\nzenity --warning --title=loftus --text=\"$1\""
+    SUGGEST_CMD_INFO = "#!/bin/bash\nnotify-send loftus \"$1\""
 )
 
 type Backend interface {

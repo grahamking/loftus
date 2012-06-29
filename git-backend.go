@@ -22,6 +22,7 @@ type GitBackend struct {
 	syncLock      sync.Mutex
 	isSyncPending bool
     isSyncActive bool   // Ignore all events during sync
+    isOnline bool       // Can we talk to remote git / ssh server?
 
     lastEvent time.Time
 
@@ -37,7 +38,10 @@ func NewGitBackend(config *Config) *GitBackend {
 		log.Fatal("Error looking for 'git' on path. ", err)
 	}
 
-	return &GitBackend{rootDir: rootDir, gitPath: gitPath}
+	return &GitBackend{
+        rootDir: rootDir,
+        gitPath: gitPath,
+        isOnline: true}
 }
 
 // A file or directory has been created
@@ -57,12 +61,16 @@ func (self *GitBackend) Sync() error {
 
 	var err *GitError
 
-	// Pull first to ensure a fast-forward when we push
-	err = self.pull()
-	if err != nil {
-        self.isSyncActive = false
-		return err
-	}
+    self.checkGitConnection()
+
+    if self.isOnline {
+        // Pull first to ensure a fast-forward when we push
+        err = self.pull()
+        if err != nil {
+            self.isSyncActive = false
+            return err
+        }
+    }
 
 	err = self.git("add", "--all")
 	if err != nil {
@@ -81,15 +89,36 @@ func (self *GitBackend) Sync() error {
 		return err
 	}
 
-	err = self.push()
-	if err != nil {
-        self.isSyncActive = false
-        return err
-	}
+    if self.isOnline {
+        err = self.push()
+        if err != nil {
+            self.isSyncActive = false
+            return err
+        }
+    }
 
     self.isSyncActive = false
     log.Println("* Sync end")
 	return nil
+}
+
+// Check whether we can talk to remote git repo, and inform
+func (self *GitBackend) checkGitConnection() {
+
+    isOnline := self.isOnlineCheck()
+
+    if isOnline != self.isOnline {
+
+        self.isOnline = isOnline
+
+        if isOnline {
+            log.Println("Back online")
+            Info("Back online")
+        } else {
+            log.Println("Working offline")
+            Warn("Could not connect to remote git repo. Working offline.")
+        }
+    }
 }
 
 //Display summary of changes
@@ -229,6 +258,12 @@ func (self *GitBackend) pull() *GitError {
     self.displayStatus("diff", "origin/master", "--name-status")
 	err = self.git("merge", "origin/master")
 	return err
+}
+
+// Run: git remote show origin
+// We use this to check if we are online
+func (self *GitBackend) isOnlineCheck() bool {
+    return self.git("remote", "show", "origin") == nil
 }
 
 /* Runs a git command, returns nil if success, error if err
