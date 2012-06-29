@@ -81,15 +81,13 @@ func (self *GitBackend) Sync() error {
     self.displayStatus("status", "--porcelain")
 
 	err = self.git("commit", "--all", "--message=loftus")
-	if err != nil {
-        // An err with status==1 means nothing to commit,
-        // that counts as a clean exit
+    // An err with status==1 means nothing to commit, it's not an error
+	if err != nil && err.status != 1 {
         self.isSyncActive = false
-        log.Println("* Sync end")
 		return err
 	}
 
-    if self.isOnline {
+    if self.isOnline && self.isBehindRemote() {
         err = self.push()
         if err != nil {
             self.isSyncActive = false
@@ -264,6 +262,13 @@ func (self *GitBackend) pull() *GitError {
 // We use this to check if we are online
 func (self *GitBackend) isOnlineCheck() bool {
     return self.git("remote", "show", "origin") == nil
+}
+
+// Is the local repo behind the remote, i.e. is a push needed?
+func (self *GitBackend) isBehindRemote() bool {
+
+    created, modified, deleted := self.status("diff", "origin/master", "--name-status")
+    return (len(created) != 0 || len(modified) != 0 || len(deleted) != 0)
 }
 
 /* Runs a git command, returns nil if success, error if err
