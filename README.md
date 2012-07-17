@@ -15,10 +15,10 @@ Only problem is probably ssh private key: `.ssh/id_dsa or id_rsa`
 Can save acl with `getfacl` into a separate file, then restore it with `setfacl --restore=`.
 
 **Do we get told when machine is shutting down / we are stopping?**
-Probably a sigkill - trap it and run two git commands.
+SIGTERM, need to trap it with os/signal
+http://stackoverflow.com/a/11269077/146620
 
-**Other option is loftus specific user, ssh key with no passphrase**
-
+**Initial setup**
 On server:
 
     sudo adduser loftus --shell /usr/bin/git-shell --disabled-password
