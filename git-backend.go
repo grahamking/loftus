@@ -114,7 +114,7 @@ func (self *GitBackend) checkGitConnection() {
             Info("Back online")
         } else {
             log.Println("Working offline")
-            Warn("Could not connect to remote git repo. Working offline.")
+            Info("Could not connect to remote git repo. Working offline.")
         }
     }
 }
