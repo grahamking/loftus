@@ -15,7 +15,6 @@ const (
 	INTERESTING      = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
 
 	DEFAULT_SYNC_DIR = "/loftus"
-	DEFAULT_LOG_DIR  = "/.loftus/"
 
     CMD_ALERT = "loftus_alert"
     CMD_INFO = "loftus_info"
@@ -36,8 +35,6 @@ type Config struct {
 	isCheck    bool
 	serverAddr string
 	syncDir    string
-	logDir     string
-	stdout     bool
 }
 
 type Client struct {
@@ -50,12 +47,6 @@ type Client struct {
 func main() {
 
 	config := confFromFlags()
-	log.Println("Logging to ", config.logDir)
-
-	os.Mkdir(config.logDir, 0750)
-    if ! config.stdout {
-        logTo(config.logDir + "loftus.log")
-    }
 
 	if config.isServer {
         log.Println("Server mode")
@@ -81,19 +72,12 @@ func confFromFlags() *Config {
 		"",
         "address:port where server is listening. e.g. an.example.com:8007")
 
-	defaultLog := os.Getenv("HOME") + DEFAULT_LOG_DIR
-	var logDir = flag.String("log", defaultLog, "Log directory")
-
-	var stdout = flag.Bool("stdout", false, "Log to stdout")
-
 	flag.Parse()
 
 	return &Config{
 		isServer:   *isServer,
 		serverAddr: *serverAddr,
-		syncDir:    *syncDir,
-		logDir:     *logDir,
-		stdout:     *stdout}
+		syncDir:    *syncDir}
 }
 
 // Watch directories, called sync methods on backend, etc
@@ -132,19 +116,6 @@ func startClient(config *Config) {
 	go udpListen(incomingChannel)
 	go tcpListen(config.serverAddr, incomingChannel)
 	client.run()
-}
-
-// Set log output to given fullpath
-func logTo(fullpath string) {
-
-	writer, err := os.OpenFile(
-		fullpath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0650)
-
-	if err != nil {
-		log.Fatal("Error opening log file", fullpath, err)
-	}
-
-    log.SetOutput(writer)
 }
 
 // Check sync directory is accessible
