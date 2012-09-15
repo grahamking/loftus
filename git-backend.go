@@ -12,6 +12,7 @@ import (
 
 const (
 	SYNC_IDLE_SECS = 5
+	MAX_SUMMARY_NAMES = 3
 )
 
 type GitBackend struct {
@@ -78,9 +79,9 @@ func (self *GitBackend) Sync() error {
 		return err
 	}
 
-    self.displayStatus("status", "--porcelain")
+	commitMsg := self.displayStatus("status", "--porcelain")
 
-	err = self.git("commit", "--all", "--message=loftus")
+	err = self.git("commit", "--all", "--message=" + commitMsg)
     // An err with status==1 means nothing to commit, it's not an error
 	if err != nil && err.status != 1 {
         self.isSyncActive = false
@@ -119,33 +120,43 @@ func (self *GitBackend) checkGitConnection() {
     }
 }
 
-//Display summary of changes
-func (self *GitBackend) displayStatus(args ...string) {
+// Display summary of changes, and return that summary
+func (self *GitBackend) displayStatus(args ...string) string {
 
     created, modified, deleted := self.status(args...)
 
-    var msg string
-    if len(created) == 1 {
-        msg += "New: " + created[0]
-    } else if len(created) > 1 {
-        msg += "New: " + strconv.Itoa(len(created))
-    }
-
-    if len(modified) == 1 {
-        msg += " Edit: " + modified[0]
-    } else if len(modified) > 1 {
-        msg += " Edit: " + strconv.Itoa(len(modified))
-    }
-
-    if len(deleted) == 1 {
-        msg += " Del: " + deleted[0]
-    } else if len(deleted) > 1 {
-        msg += " Del: " + strconv.Itoa(len(deleted))
-    }
+	msg := summaryMsg(created, "New") +
+		   summaryMsg(modified, "Edit") +
+		   summaryMsg(deleted, "Del")
 
     if len(msg) != 0 {
         Info(msg)
     }
+	return msg
+}
+
+// Short summary of what's in 'changed'.
+func summaryMsg(changed []string, action string) string {
+
+	var msg string
+	var fs []string
+
+	for pos, filename := range changed {
+
+		if pos >= MAX_SUMMARY_NAMES {
+			remain := len(changed) - MAX_SUMMARY_NAMES
+			fs = append(fs, "and " + strconv.Itoa(remain) + " more.")
+			break
+		}
+
+		fs = append(fs, filename)
+	}
+
+	if len(fs) != 0 {
+		msg = action + ": " + strings.Join(fs, ", ")
+	}
+
+	return msg
 }
 
 // Register the function to be called after we push to remote
