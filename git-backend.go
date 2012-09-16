@@ -266,7 +266,7 @@ func (self *GitBackend) pull() *GitError {
 		return err
 	}
 
-	self.displayStatus("diff", "origin/master", "--name-status")
+	//self.displayStatus("diff", "origin/master", "--name-status")
 	err = self.git("merge", "origin/master")
 	return err
 }
