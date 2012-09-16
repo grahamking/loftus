@@ -3,34 +3,35 @@ package main
 import (
 	"log"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-    "strconv"
 )
 
 const (
-	SYNC_IDLE_SECS = 5
+	SYNC_IDLE_SECS    = 5
 	MAX_SUMMARY_NAMES = 3
 )
 
 type GitBackend struct {
-	gitPath string
+	external External
+	gitPath  string
 
 	rootDir string
 
 	syncLock      sync.Mutex
 	isSyncPending bool
-    isSyncActive bool   // Ignore all events during sync
-    isOnline bool       // Can we talk to remote git / ssh server?
+	isSyncActive  bool // Ignore all events during sync
+	isOnline      bool // Can we talk to remote git / ssh server?
 
-    lastEvent time.Time
+	lastEvent time.Time
 
 	pushHook func()
 }
 
-func NewGitBackend(config *Config) *GitBackend {
+func NewGitBackend(config *Config, external External) *GitBackend {
 
 	rootDir := config.syncDir
 
@@ -40,9 +41,10 @@ func NewGitBackend(config *Config) *GitBackend {
 	}
 
 	return &GitBackend{
-        rootDir: rootDir,
-        gitPath: gitPath,
-        isOnline: true}
+		rootDir:  rootDir,
+		gitPath:  gitPath,
+		external: external,
+		isOnline: true}
 }
 
 // A file or directory has been created
@@ -50,88 +52,88 @@ func (self *GitBackend) Changed(filename string) {
 	if self.isGit(filename) || self.isSyncActive {
 		return
 	}
-    self.lastEvent = time.Now()
+	self.lastEvent = time.Now()
 	go self.syncLater()
 }
 
 // Run: git pull; git add --all ; git commit --all; git push
 func (self *GitBackend) Sync() error {
 
-    log.Println("* Sync start")
-    self.isSyncActive = true
+	log.Println("* Sync start")
+	self.isSyncActive = true
 
 	var err *GitError
 
-    self.checkGitConnection()
+	self.checkGitConnection()
 
-    if self.isOnline {
-        // Pull first to ensure a fast-forward when we push
-        err = self.pull()
-        if err != nil {
-            self.isSyncActive = false
-            return err
-        }
-    }
+	if self.isOnline {
+		// Pull first to ensure a fast-forward when we push
+		err = self.pull()
+		if err != nil {
+			self.isSyncActive = false
+			return err
+		}
+	}
 
 	err = self.git("add", "--all")
 	if err != nil {
-        self.isSyncActive = false
+		self.isSyncActive = false
 		return err
 	}
 
 	commitMsg := self.displayStatus("status", "--porcelain")
 
-	err = self.git("commit", "--all", "--message=" + commitMsg)
-    // An err with status==1 means nothing to commit, it's not an error
+	err = self.git("commit", "--all", "--message="+commitMsg)
+	// An err with status==1 means nothing to commit, it's not an error
 	if err != nil && err.status != 1 {
-        self.isSyncActive = false
+		self.isSyncActive = false
 		return err
 	}
 
-    if self.isOnline && self.isBehindRemote() {
-        err = self.push()
-        if err != nil {
-            self.isSyncActive = false
-            return err
-        }
-    }
+	if self.isOnline && self.isBehindRemote() {
+		err = self.push()
+		if err != nil {
+			self.isSyncActive = false
+			return err
+		}
+	}
 
-    self.isSyncActive = false
-    log.Println("* Sync end")
+	self.isSyncActive = false
+	log.Println("* Sync end")
 	return nil
 }
 
 // Check whether we can talk to remote git repo, and inform
 func (self *GitBackend) checkGitConnection() {
 
-    isOnline := self.isOnlineCheck()
+	isOnline := self.isOnlineCheck()
 
-    if isOnline != self.isOnline {
+	if isOnline != self.isOnline {
 
-        self.isOnline = isOnline
+		self.isOnline = isOnline
 
-        if isOnline {
-            log.Println("Back online")
-            Info("Back online")
-        } else {
-            log.Println("Working offline")
-            Info("Could not connect to remote git repo. Working offline.")
-        }
-    }
+		if isOnline {
+			log.Println("Back online")
+			self.info("Back online")
+		} else {
+			log.Println("Working offline")
+			self.info("Could not connect to remote git repo. Working offline.")
+		}
+	}
 }
 
 // Display summary of changes, and return that summary
 func (self *GitBackend) displayStatus(args ...string) string {
 
-    created, modified, deleted := self.status(args...)
+	created, modified, deleted := self.status(args...)
 
 	msg := summaryMsg(created, "New") +
-		   summaryMsg(modified, "Edit") +
-		   summaryMsg(deleted, "Del")
+		summaryMsg(modified, "Edit") +
+		summaryMsg(deleted, "Del")
 
-    if len(msg) != 0 {
-        Info(msg)
-    }
+	if len(msg) != 0 {
+		self.info(msg)
+	}
 	return msg
 }
 
@@ -145,7 +147,7 @@ func summaryMsg(changed []string, action string) string {
 
 		if pos >= MAX_SUMMARY_NAMES {
 			remain := len(changed) - MAX_SUMMARY_NAMES
-			fs = append(fs, "and " + strconv.Itoa(remain) + " more.")
+			fs = append(fs, "and "+strconv.Itoa(remain)+" more.")
 			break
 		}
 
@@ -178,44 +180,44 @@ func (self *GitBackend) status(args ...string) (created []string, modified []str
 	cmd.Dir = self.rootDir
 
 	output, err := cmd.CombinedOutput()
-    if err != nil {
-        log.Println(err)
-    }
-    if len(output) > 0 {
-        log.Println(string(output))
-    }
+	if err != nil {
+		log.Println(err)
+	}
+	if len(output) > 0 {
+		log.Println(string(output))
+	}
 
-    for _, line := range strings.Split(string(output), "\n") {
-        if len(line) == 0 {
-            continue
-        }
+	for _, line := range strings.Split(string(output), "\n") {
+		if len(line) == 0 {
+			continue
+		}
 
-        // Replace double spaces and tabs with single space so that Split is predictable
-        line = strings.Replace(line, "  ", " ", -1)
-        line = strings.Replace(line, "\t", " ", -1)
+		// Replace double spaces and tabs with single space so that Split is predictable
+		line = strings.Replace(line, "  ", " ", -1)
+		line = strings.Replace(line, "\t", " ", -1)
 
-        lineParts := strings.Split(line, " ")
+		lineParts := strings.Split(line, " ")
 
-        status := lineParts[0]
-        filename := lineParts[1]
+		status := lineParts[0]
+		filename := lineParts[1]
 
-        switch status[0] {
-            case 'A':
-                created = append(created, filename)
-            case 'M':
-                modified = append(modified, filename)
-            case 'R':                         // Renamed, but treat as Modified
-                modified = append(modified, filename)
-            case 'D':
-                deleted = append(deleted, filename)
-            case '?':
-                log.Println("Unknown. Need git add", filename)
-            default:
-                log.Println("Other", status)
-        }
-    }
+		switch status[0] {
+		case 'A':
+			created = append(created, filename)
+		case 'M':
+			modified = append(modified, filename)
+		case 'R': // Renamed, but treat as Modified
+			modified = append(modified, filename)
+		case 'D':
+			deleted = append(deleted, filename)
+		case '?':
+			log.Println("Unknown. Need git add", filename)
+		default:
+			log.Println("Other", status)
+		}
+	}
 
-    return created, modified, deleted
+	return created, modified, deleted
 }
 
 // Is filename inside a .git directory?
@@ -235,11 +237,11 @@ func (self *GitBackend) syncLater() {
 	self.isSyncPending = true
 	self.syncLock.Unlock()
 
-    for time.Now().Sub(self.lastEvent) < (SYNC_IDLE_SECS * time.Second) {
-        time.Sleep(time.Second)
-    }
+	for time.Now().Sub(self.lastEvent) < (SYNC_IDLE_SECS * time.Second) {
+		time.Sleep(time.Second)
+	}
 
-    log.Println("syncLater initiated sync")
+	log.Println("syncLater initiated sync")
 	self.Sync()
 
 	self.isSyncPending = false
@@ -257,14 +259,14 @@ func (self *GitBackend) push() *GitError {
 // Run: git pull
 func (self *GitBackend) pull() *GitError {
 
-    var err *GitError
+	var err *GitError
 
-    err = self.git("fetch")
-    if err != nil {
-        return err
-    }
+	err = self.git("fetch")
+	if err != nil {
+		return err
+	}
 
-    self.displayStatus("diff", "origin/master", "--name-status")
+	self.displayStatus("diff", "origin/master", "--name-status")
 	err = self.git("merge", "origin/master")
 	return err
 }
@@ -272,14 +274,14 @@ func (self *GitBackend) pull() *GitError {
 // Run: git remote show origin
 // We use this to check if we are online
 func (self *GitBackend) isOnlineCheck() bool {
-    return self.git("remote", "show", "origin") == nil
+	return self.git("remote", "show", "origin") == nil
 }
 
 // Is the local repo behind the remote, i.e. is a push needed?
 func (self *GitBackend) isBehindRemote() bool {
 
-    created, modified, deleted := self.status("diff", "origin/master", "--name-status")
-    return (len(created) != 0 || len(modified) != 0 || len(deleted) != 0)
+	created, modified, deleted := self.status("diff", "origin/master", "--name-status")
+	return (len(created) != 0 || len(modified) != 0 || len(deleted) != 0)
 }
 
 /* Runs a git command, returns nil if success, error if err
@@ -288,42 +290,45 @@ func (self *GitBackend) isBehindRemote() bool {
 */
 func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
 
-	cmd := exec.Command(self.gitPath, append([]string{gitCmd}, args...)...)
-	cmd.Dir = self.rootDir
-	log.Println(strings.Join(cmd.Args, " "))
+	allArgs := append([]string{gitCmd}, args...)
+	output, err := self.external.Exec(self.rootDir, self.gitPath, allArgs...)
 
-	output, err := cmd.CombinedOutput()
-    if len(output) > 0 {
-        log.Println(string(output))
-    }
+	if len(output) > 0 {
+		log.Println(string(output))
+	}
 
 	if err == nil {
-        return nil
-    }
+		return nil
+	}
 
-    exitStatus := err.(*exec.ExitError).Sys().(syscall.WaitStatus).ExitStatus()
-    gitErr := &GitError{
-        cmd: strings.Join(cmd.Args, " "),
-        internalError: err,
-        output: string(output),
-        status: exitStatus}
-    if exitStatus != 1 {            // 1 means command had nothing to do
-        log.Println(err)
-    }
-    return gitErr
+	exitStatus := err.(*exec.ExitError).Sys().(syscall.WaitStatus).ExitStatus()
+	gitErr := &GitError{
+		cmd:           self.gitPath + " " + strings.Join(allArgs, " "),
+		internalError: err,
+		output:        string(output),
+		status:        exitStatus}
+	if exitStatus != 1 { // 1 means command had nothing to do
+		log.Println(err)
+	}
+	return gitErr
+}
+
+// Utility function to inform user about something - for example file changes
+func (self *GitBackend) info(msg string) {
+	self.external.Exec("", CMD_INFO, msg)
 }
 
 type GitError struct {
 	cmd           string
 	internalError error
 	output        string
-    status        int
+	status        int
 }
 
 // error implementation which displays git info
 func (self *GitError) Error() string {
-    msg := "git error running: " + self.cmd + "\n\n"
-    msg += self.output + "\n"
+	msg := "git error running: " + self.cmd + "\n\n"
+	msg += self.output + "\n"
 	msg += self.internalError.Error()
-    return msg
+	return msg
 }
