@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -127,21 +128,35 @@ func (self *Client) run() {
 		udpSend(msg)
 	})
 
+	affected := make(map[string]*inotify.Event)
+
 	for {
 		select {
 		case ev := <-self.watcher.Event:
-
 			log.Println(ev)
 
-			isCreate := ev.Mask&inotify.IN_CREATE != 0
-			isDir := ev.Mask&inotify.IN_ISDIR != 0
+			// Coalesce events (inotify can fire many identical events)
+			affected[ev.Name] = ev
 
-			if isCreate && isDir && self.backend.ShouldWatch(ev.Name) {
-				log.Println("Adding watch", ev.Name)
-				self.watcher.AddWatch(ev.Name, INTERESTING)
+		case <-time.After(100 * time.Millisecond):
+
+			// Dispatch all captured events
+
+			for name, event := range affected {
+
+				log.Println("Dispatching", name)
+				isCreate := event.Mask&inotify.IN_CREATE != 0
+				isDir := event.Mask&inotify.IN_ISDIR != 0
+
+				if isCreate && isDir && self.backend.ShouldWatch(name) {
+					log.Println("Adding watch", name)
+					self.watcher.AddWatch(name, INTERESTING)
+				}
+
+				self.backend.Changed(name)
 			}
 
-			self.backend.Changed(ev.Name)
+			affected = make(map[string]*inotify.Event)
 
 		case err := <-self.watcher.Error:
 			log.Println("error:", err)
@@ -159,7 +174,6 @@ func (self *Client) addWatches() {
 
 	addSingleWatch := func(path string, info os.FileInfo, err error) error {
 		if info.IsDir() && self.backend.ShouldWatch(path) {
-			//log.Println("Watching", path)
 			self.watcher.AddWatch(path, INTERESTING)
 		}
 		return nil
