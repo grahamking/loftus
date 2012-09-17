@@ -166,11 +166,6 @@ func (self *GitBackend) RegisterPushHook(callback func()) {
 	self.pushHook = callback
 }
 
-// Should the inotify watch watch the given path
-func (self *GitBackend) ShouldWatch(filename string) bool {
-	return !self.isGit(filename)
-}
-
 // Status of directory. Returns filenames created, modified or deleted.
 func (self *GitBackend) status(args ...string) (created []string, modified []string, deleted []string) {
 

@@ -2,17 +2,12 @@ package main
 
 import (
 	"flag"
-	"loftus/inotify"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
-	"time"
 )
 
 const (
-	INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
-
 	DEFAULT_SYNC_DIR = "/loftus"
 
 	CMD_ALERT = "loftus_alert"
@@ -25,7 +20,6 @@ const (
 type Backend interface {
 	Sync() error
 	Changed(filename string)
-	ShouldWatch(filename string) bool
 	RegisterPushHook(func())
 }
 
@@ -38,8 +32,7 @@ type Config struct {
 
 type Client struct {
 	backend  Backend
-	rootDir  string
-	watcher  *inotify.Watcher
+	watch    chan string
 	external External
 	incoming chan string
 }
@@ -92,18 +85,20 @@ func startClient(config *Config) {
 
 	CheckEverything(external, syncDir, backend, config)
 
-	watcher, _ := inotify.NewWatcher()
+	log.Println("Watching", syncDir, "and all sub-directories")
+	watchChannel, err := Watch(syncDir)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	incomingChannel := make(chan string)
 
 	client := Client{
-		rootDir:  syncDir,
 		backend:  backend,
-		watcher:  watcher,
+		watch:    watchChannel,
 		external: external,
 		incoming: incomingChannel,
 	}
-	client.addWatches()
 
 	go udpListen(incomingChannel)
 	go tcpListen(config.serverAddr, incomingChannel)
@@ -128,61 +123,16 @@ func (self *Client) run() {
 		udpSend(msg)
 	})
 
-	affected := make(map[string]*inotify.Event)
-
 	for {
 		select {
-		case ev := <-self.watcher.Event:
-			log.Println(ev)
-
-			// Coalesce events (inotify can fire many identical events)
-			affected[ev.Name] = ev
-
-		case <-time.After(100 * time.Millisecond):
-
-			// Dispatch all captured events
-
-			for name, event := range affected {
-
-				log.Println("Dispatching", name)
-				isCreate := event.Mask&inotify.IN_CREATE != 0
-				isDir := event.Mask&inotify.IN_ISDIR != 0
-
-				if isCreate && isDir && self.backend.ShouldWatch(name) {
-					log.Println("Adding watch", name)
-					self.watcher.AddWatch(name, INTERESTING)
-				}
-
-				self.backend.Changed(name)
-			}
-
-			affected = make(map[string]*inotify.Event)
-
-		case err := <-self.watcher.Error:
-			log.Println("error:", err)
+		case name := <-self.watch:
+			self.backend.Changed(name)
 
 		case <-self.incoming:
 			log.Println("Remote update notification")
 			self.backend.Sync()
 		}
 
-	}
-}
-
-// Add inotify watches on rootDir and all sub-dirs
-func (self *Client) addWatches() {
-
-	addSingleWatch := func(path string, info os.FileInfo, err error) error {
-		if info.IsDir() && self.backend.ShouldWatch(path) {
-			self.watcher.AddWatch(path, INTERESTING)
-		}
-		return nil
-	}
-
-	log.Println("Watching", self.rootDir, "and all sub-directories")
-	err := filepath.Walk(self.rootDir, addSingleWatch)
-	if err != nil {
-		log.Fatal(err)
 	}
 }
 
