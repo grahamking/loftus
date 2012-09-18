@@ -5,10 +5,12 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
 	DEFAULT_SYNC_DIR = "/loftus"
+	SYNC_IDLE_SECS   = 5
 
 	CMD_ALERT = "loftus_alert"
 	CMD_INFO  = "loftus_info"
@@ -19,7 +21,6 @@ const (
 
 type Backend interface {
 	Sync() error
-	Changed(filename string)
 	RegisterPushHook(func())
 }
 
@@ -123,17 +124,27 @@ func (self *Client) run() {
 		udpSend(msg)
 	})
 
+	isSyncPending := false
+
 	for {
 		select {
-		case name := <-self.watch:
-			self.backend.Changed(name)
+
+		case <-self.watch:
+			//self.backend.Changed(name)
+			isSyncPending = true
 
 		case <-self.incoming:
 			log.Println("Remote update notification")
 			self.backend.Sync()
-		}
 
+		case <-time.After(SYNC_IDLE_SECS * time.Second):
+			if isSyncPending {
+				isSyncPending = false
+				self.backend.Sync()
+			}
+		}
 	}
+
 }
 
 // Utility function to warn user about something - for example a git error

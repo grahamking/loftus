@@ -5,29 +5,18 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
-	"time"
 )
 
 const (
-	SYNC_IDLE_SECS    = 5
 	MAX_SUMMARY_NAMES = 3
 )
 
 type GitBackend struct {
 	external External
 	gitPath  string
-
-	rootDir string
-
-	syncLock      sync.Mutex
-	isSyncPending bool
-	isSyncActive  bool // Ignore all events during sync
-	isOnline      bool // Can we talk to remote git / ssh server?
-
-	lastEvent time.Time
-
+	rootDir  string
+	isOnline bool // Can we talk to remote git / ssh server?
 	pushHook func()
 }
 
@@ -47,20 +36,10 @@ func NewGitBackend(config *Config, external External) *GitBackend {
 		isOnline: true}
 }
 
-// A file or directory has been created
-func (self *GitBackend) Changed(filename string) {
-	if self.isGit(filename) || self.isSyncActive {
-		return
-	}
-	self.lastEvent = time.Now()
-	go self.syncLater()
-}
-
 // Run: git pull; git add --all ; git commit --all; git push
 func (self *GitBackend) Sync() error {
 
 	log.Println("* Sync start")
-	self.isSyncActive = true
 
 	var err *GitError
 
@@ -70,14 +49,12 @@ func (self *GitBackend) Sync() error {
 		// Pull first to ensure a fast-forward when we push
 		err = self.pull()
 		if err != nil {
-			self.isSyncActive = false
 			return err
 		}
 	}
 
 	err = self.git("add", "--all")
 	if err != nil {
-		self.isSyncActive = false
 		return err
 	}
 
@@ -86,19 +63,16 @@ func (self *GitBackend) Sync() error {
 	err = self.git("commit", "--all", "--message="+commitMsg)
 	// An err with status==1 means nothing to commit, it's not an error
 	if err != nil && err.status != 1 {
-		self.isSyncActive = false
 		return err
 	}
 
 	if self.isOnline && self.isBehindRemote() {
 		err = self.push()
 		if err != nil {
-			self.isSyncActive = false
 			return err
 		}
 	}
 
-	self.isSyncActive = false
 	log.Println("* Sync end")
 	return nil
 }
@@ -213,33 +187,6 @@ func (self *GitBackend) status(args ...string) (created []string, modified []str
 	}
 
 	return created, modified, deleted
-}
-
-// Is filename inside a .git directory?
-func (self *GitBackend) isGit(filename string) bool {
-	return strings.Contains(filename, ".git")
-}
-
-// Schedule a synchronise for in a few seconds. Run it in go routine.
-func (self *GitBackend) syncLater() {
-
-	// ensure only once per time - might be able to use sync.Once instead (?)
-	self.syncLock.Lock()
-	if self.isSyncPending {
-		self.syncLock.Unlock()
-		return
-	}
-	self.isSyncPending = true
-	self.syncLock.Unlock()
-
-	for time.Now().Sub(self.lastEvent) < (SYNC_IDLE_SECS * time.Second) {
-		time.Sleep(time.Second)
-	}
-
-	log.Println("syncLater initiated sync")
-	self.Sync()
-
-	self.isSyncPending = false
 }
 
 // Run: git push
