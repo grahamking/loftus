@@ -16,12 +16,12 @@ func TestMainLoop(t *testing.T) {
 	external := &MockExternal{}
 	backend := NewGitBackend(config, external)
 
-	watchChannel := make(chan string)
+	watchChannel := make(chan Event)
 	incomingChannel := make(chan string)
 
 	client := Client{
-		backend: backend,
-		watch: watchChannel,
+		backend:  backend,
+		watch:    watchChannel,
 		external: external,
 		incoming: incomingChannel,
 		isOnline: true,
@@ -30,14 +30,14 @@ func TestMainLoop(t *testing.T) {
 	go client.run()
 
 	// Something changed.
-	watchChannel <- "/tmp/fake/one.txt"
+	watchChannel <- Event{"/tmp/fake/one.txt", "Edit"}
 
 	expected := []string{
 		"/usr/bin/git remote show origin",
 		"/usr/bin/git fetch",
 		"/usr/bin/git merge origin/master",
 		"/usr/bin/git add --all",
-		"/usr/bin/git commit --all --message=TODO",
+		"/usr/bin/git commit --all --message=Startup sync",
 		"/usr/bin/git push",
 	}
 	if fmt.Sprintf("%v", external.cmds) != fmt.Sprintf("%v", expected) {
@@ -51,7 +51,6 @@ type MockExternal struct {
 
 func (self *MockExternal) Exec(rootDir string, cmd string, args ...string) ([]byte, error) {
 
-
-	self.cmds = append(self.cmds, cmd + " " + strings.Join(args, " "))
+	self.cmds = append(self.cmds, cmd+" "+strings.Join(args, " "))
 	return []byte(""), nil
 }

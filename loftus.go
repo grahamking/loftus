@@ -49,7 +49,7 @@ type Config struct {
 
 type Client struct {
 	backend  Storage
-	watch    chan string
+	watch    chan Event
 	external External
 	incoming chan string
 	isOnline bool
@@ -128,35 +128,46 @@ func startClient(config *Config) {
 func (self *Client) run() {
 
 	// Always start with a sync to bring us up to date
-	err := self.Sync()
+	err := self.Sync("Startup sync")
 	if err != nil {
 		self.warn(err.Error())
 	}
 
-	isSyncPending := false
+	events := make([]Event, 0, 1)
 
 	for {
 		select {
 
-		case <-self.watch:
-			isSyncPending = true
+		case event := <-self.watch:
+			events = append(events, event)
 
 		case <-self.incoming:
 			log.Println("Remote update notification")
-			self.Sync()
+			self.Sync("Incoming")
 
 		case <-time.After(SYNC_IDLE_SECS * time.Second):
-			if isSyncPending {
-				isSyncPending = false
-				self.Sync()
+			if len(events) != 0 {
+				self.Sync(commitMsg(events))
+				events = make([]Event, 0, 1)
 			}
 		}
 	}
 
 }
 
+func commitMsg(events []Event) string {
+
+	var msg string
+	msgs := make([]string, 0, len(events))
+	for _, event := range events {
+		msg = event.Event + ": " + event.Filename
+		msgs = append(msgs, msg)
+	}
+	return strings.Join(msgs, ", ")
+}
+
 // Run: git pull; git add --all ; git commit --all; git push
-func (self *Client) Sync() error {
+func (self *Client) Sync(commitMsg string) error {
 
 	log.Println("* Sync start")
 
@@ -196,7 +207,7 @@ func (self *Client) Sync() error {
 	//commitMsg := self.displayStatus("status", "--porcelain")
 
 	//err = self.git("commit", "--all", "--message="+commitMsg)
-	self.backend.Commit("TODO")
+	self.backend.Commit(commitMsg)
 	if err != nil {
 		return err
 	}
@@ -231,4 +242,3 @@ func (self *Client) warn(msg string) {
 func (self *Client) info(msg string) {
 	self.external.Exec("", CMD_INFO, msg)
 }
-

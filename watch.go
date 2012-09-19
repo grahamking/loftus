@@ -14,21 +14,35 @@ const (
 	INTERESTING = inotify.IN_MODIFY | inotify.IN_CREATE | inotify.IN_DELETE | inotify.IN_MOVE
 )
 
+var (
+	HUMAN_EVENT = map[uint32]string{
+		inotify.IN_MODIFY: "Edit",
+		inotify.IN_CREATE: "New",
+		inotify.IN_DELETE: "Del",
+		inotify.IN_MOVE:   "Move",
+	}
+)
+
+type Event struct {
+	Filename string
+	Event    string
+}
+
 type Watcher struct {
 	watcher *inotify.Watcher
-	changed chan string
+	changed chan Event
 }
 
 // Start an inotify watch on all directories starting at 'root',
-// sending filenames changed on reuturned channel.
-func Watch(root string) (chan string, error) {
+// sending filenames changed on returned channel.
+func Watch(root string) (chan Event, error) {
 
 	inotifyWatcher, ierr := inotify.NewWatcher()
 	if ierr != nil {
 		return nil, ierr
 	}
 
-	w := &Watcher{inotifyWatcher, make(chan string)}
+	w := &Watcher{inotifyWatcher, make(chan Event)}
 
 	err := w.watchDirs(root)
 	if err != nil {
@@ -95,7 +109,7 @@ func (self *Watcher) run() {
 					self.watcher.AddWatch(name, INTERESTING)
 				}
 
-				self.changed <- name
+				self.changed <- Event{filepath.Base(name), HUMAN_EVENT[event.Mask]}
 			}
 
 			affected = make(map[string]*inotify.Event)
