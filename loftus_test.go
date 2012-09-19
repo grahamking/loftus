@@ -24,6 +24,7 @@ func TestMainLoop(t *testing.T) {
 		watch: watchChannel,
 		external: external,
 		incoming: incomingChannel,
+		isOnline: true,
 	}
 
 	go client.run()
@@ -36,7 +37,8 @@ func TestMainLoop(t *testing.T) {
 		"/usr/bin/git fetch",
 		"/usr/bin/git merge origin/master",
 		"/usr/bin/git add --all",
-		"/usr/bin/git commit --all --message=",
+		"/usr/bin/git commit --all --message=TODO",
+		"/usr/bin/git push",
 	}
 	if fmt.Sprintf("%v", external.cmds) != fmt.Sprintf("%v", expected) {
 		t.Error("Unexpected exec: ", external.cmds)

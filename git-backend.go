@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -36,67 +36,8 @@ func NewGitBackend(config *Config, external External) *GitBackend {
 		isOnline: true}
 }
 
-// Run: git pull; git add --all ; git commit --all; git push
-func (self *GitBackend) Sync() error {
-
-	log.Println("* Sync start")
-
-	var err *GitError
-
-	self.checkGitConnection()
-
-	if self.isOnline {
-		// Pull first to ensure a fast-forward when we push
-		err = self.pull()
-		if err != nil {
-			return err
-		}
-	}
-
-	err = self.git("add", "--all")
-	if err != nil {
-		return err
-	}
-
-	commitMsg := self.displayStatus("status", "--porcelain")
-
-	err = self.git("commit", "--all", "--message="+commitMsg)
-	// An err with status==1 means nothing to commit, it's not an error
-	if err != nil && err.status != 1 {
-		return err
-	}
-
-	if self.isOnline && self.isBehindRemote() {
-		err = self.push()
-		if err != nil {
-			return err
-		}
-	}
-
-	log.Println("* Sync end")
-	return nil
-}
-
-// Check whether we can talk to remote git repo, and inform
-func (self *GitBackend) checkGitConnection() {
-
-	isOnline := self.isOnlineCheck()
-
-	if isOnline != self.isOnline {
-
-		self.isOnline = isOnline
-
-		if isOnline {
-			log.Println("Back online")
-			self.info("Back online")
-		} else {
-			log.Println("Working offline")
-			self.info("Could not connect to remote git repo. Working offline.")
-		}
-	}
-}
-
 // Display summary of changes, and return that summary
+/*
 func (self *GitBackend) displayStatus(args ...string) string {
 
 	created, modified, deleted := self.status(args...)
@@ -110,7 +51,9 @@ func (self *GitBackend) displayStatus(args ...string) string {
 	}
 	return msg
 }
+*/
 
+/*
 // Short summary of what's in 'changed'.
 func summaryMsg(changed []string, action string) string {
 
@@ -134,6 +77,7 @@ func summaryMsg(changed []string, action string) string {
 
 	return msg
 }
+*/
 
 // Register the function to be called after we push to remote
 func (self *GitBackend) RegisterPushHook(callback func()) {
@@ -190,7 +134,7 @@ func (self *GitBackend) status(args ...string) (created []string, modified []str
 }
 
 // Run: git push
-func (self *GitBackend) push() *GitError {
+func (self *GitBackend) Push() error {
 	err := self.git("push")
 	if err == nil && self.pushHook != nil {
 		go self.pushHook()
@@ -199,39 +143,53 @@ func (self *GitBackend) push() *GitError {
 }
 
 // Run: git pull
-func (self *GitBackend) pull() *GitError {
+func (self *GitBackend) Pull() error {
 
-	var err *GitError
-
-	err = self.git("fetch")
+	err := self.git("fetch")
 	if err != nil {
 		return err
 	}
 
 	//self.displayStatus("diff", "origin/master", "--name-status")
-	err = self.git("merge", "origin/master")
-	return err
+	return self.git("merge", "origin/master")
+}
+
+// Run: git add --all
+func (self *GitBackend) AddAll() error {
+	return self.git("add", "--all")
+}
+
+// Run: git commit --all --message=..
+func (self *GitBackend) Commit(msg string) error {
+	return self.git("commit", "--all", "--message="+msg)
 }
 
 // Run: git remote show origin
 // We use this to check if we are online
-func (self *GitBackend) isOnlineCheck() bool {
+func (self *GitBackend) IsOnline() bool {
 	return self.git("remote", "show", "origin") == nil
 }
 
+// Check our directory is actualy a repository
+func (self *GitBackend) Check() error {
+	err := self.git("status")
+	if err != nil {
+		return errors.New(self.rootDir + " is not a git repository")
+	}
+	return nil
+}
+
 // Is the local repo behind the remote, i.e. is a push needed?
+/*
 func (self *GitBackend) isBehindRemote() bool {
 
 	created, modified, deleted := self.status("diff", "origin/master", "--name-status")
 	return (len(created) != 0 || len(modified) != 0 || len(deleted) != 0)
 }
-
-/* Runs a git command, returns nil if success, error if err
-   Errors are not always bad. For example a "commit" that
-   didn't have to do anything returns an error.
 */
-func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
 
+// Runs a git command, returns nil if success, error if err
+func (self *GitBackend) git(gitCmd string, args ...string) error {
 	allArgs := append([]string{gitCmd}, args...)
 	output, err := self.external.Exec(self.rootDir, self.gitPath, allArgs...)
 
@@ -249,15 +207,12 @@ func (self *GitBackend) git(gitCmd string, args ...string) *GitError {
 		internalError: err,
 		output:        string(output),
 		status:        exitStatus}
+
 	if exitStatus != 1 { // 1 means command had nothing to do
 		log.Println(err)
+		return gitErr
 	}
-	return gitErr
-}
-
-// Utility function to inform user about something - for example file changes
-func (self *GitBackend) info(msg string) {
-	self.external.Exec("", CMD_INFO, msg)
+	return nil
 }
 
 type GitError struct {

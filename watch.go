@@ -56,7 +56,6 @@ func (self *Watcher) watchDirs(root string) error {
 			if isGit(path) {
 				return filepath.SkipDir
 			}
-			log.Println("Watching", path)
 			return self.watcher.AddWatch(path, INTERESTING)
 		}
 

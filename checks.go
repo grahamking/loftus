@@ -9,7 +9,7 @@ import (
 )
 
 // Run a series of checks on the environment, aborting if any errors
-func CheckEverything(external External, syncDir string, backend *GitBackend, config *Config) {
+func CheckEverything(external External, syncDir string, storage Storage, config *Config) {
 
 	abortOnErr := func(err error) {
 		if err == nil {
@@ -21,7 +21,7 @@ func CheckEverything(external External, syncDir string, backend *GitBackend, con
 	}
 
 	abortOnErr(checkDir(syncDir))
-	abortOnErr(checkIsRepo(backend))
+	abortOnErr(storage.Check())
 	checkHelperScripts() // Information only, no errors
 
 	// Only check the connection if one is configured
@@ -43,15 +43,6 @@ func checkDir(syncDir string) error {
 		return errors.New(syncDir + " is not a directory")
 	}
 
-	return nil
-}
-
-// Is the given directory a git repository?
-func checkIsRepo(backend *GitBackend) error {
-	err := backend.git("status")
-	if err != nil {
-		return errors.New(backend.rootDir + " is not a git repository")
-	}
 	return nil
 }
 
