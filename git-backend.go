@@ -202,6 +202,7 @@ func (self *GitBackend) git(gitCmd string, args ...string) error {
 	}
 
 	exitStatus := err.(*exec.ExitError).Sys().(syscall.WaitStatus).ExitStatus()
+
 	gitErr := &GitError{
 		cmd:           self.gitPath + " " + strings.Join(allArgs, " "),
 		internalError: err,

@@ -155,15 +155,30 @@ func (self *Client) run() {
 
 }
 
+// Format the underlying events into a nice commit message
 func commitMsg(events []Event) string {
 
 	var msg string
-	msgs := make([]string, 0, len(events))
+	var msgs, arr []string
+	byType := make(map[string] []string)
+
+	// Group by event type
 	for _, event := range events {
-		msg = event.Event + ": " + event.Filename
+		arr = byType[event.Event]
+		if arr == nil {
+			arr = make([]string, 0)
+		}
+
+		arr = append(arr, event.Filename)
+		byType[event.Event] = arr
+	}
+
+	for evType, evFilenames := range byType {
+		msg = evType + ": " + strings.Join(evFilenames, ", ")
 		msgs = append(msgs, msg)
 	}
-	return strings.Join(msgs, ", ")
+
+	return strings.Join(msgs, ". ")
 }
 
 // Run: git pull; git add --all ; git commit --all; git push
@@ -173,7 +188,6 @@ func (self *Client) Sync(commitMsg string) error {
 
 	var err error
 
-	//self.checkGitConnection()
 	isOnline := self.backend.IsOnline()
 	if isOnline != self.isOnline {
 
@@ -197,16 +211,11 @@ func (self *Client) Sync(commitMsg string) error {
 		}
 	}
 
-	//err = self.git("add", "--all")
 	err = self.backend.AddAll()
 	if err != nil {
 		return err
 	}
 
-	// TODO: Build this from inotify. Backend might not know.
-	//commitMsg := self.displayStatus("status", "--porcelain")
-
-	//err = self.git("commit", "--all", "--message="+commitMsg)
 	self.backend.Commit(commitMsg)
 	if err != nil {
 		return err
