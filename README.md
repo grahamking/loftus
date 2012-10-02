@@ -24,6 +24,11 @@ On server:
     sudo adduser loftus --shell /usr/bin/git-shell --disabled-password
     sudo mkdir --mode=777 /home/loftus/.ssh
 
+    cd /home/loftus/
+    mkdir repo.git ; cd repo
+    git init --bare .
+    /usr/local/bin/loftus --server --address=my.example.com:8007
+
 On client:
 
     ssh-keygen -f ~/.ssh/id_rsa.loftus    # Do not add a passphrase - just hit enter
@@ -40,27 +45,10 @@ On server:
     sudo chmod -R 500 ~loftus/.ssh
     sudo chown -R loftus:loftus ~loftus/.ssh
 
-## Setup
+## Add client
 
-Server (as user loftus):    # but loftus has no shell!?
-
-    cd /home/loftus/
-    mkdir repo.git ; cd repo
-    git init --bare .
-    /usr/local/bin/loftus --server --address=daisy.gkgk.org:8007
-
-Client:
-
-    git init .                       # Create local repo
-    git remote add origin ssh://...  # Declare where master is
-                                     # ssh://loftus@server.example.com/~loftus/repo.git
-    git pull origin master           # Fill directory
-    git push -u origin master        # So that bare "git pull" works
-    /usr/local/loftus --address=daisy.gkgk.org:8007
-
-Client alternative (isn't this better than above?)
-
-    git clone ssh://loftus_server/~/loftus.git    # See .ssh/config earlier
+    git clone ssh://loftus_server/~/repo.git loftus    # See .ssh/config earlier
+    /usr/local/loftus --address=my.example.com:8007
 
 ## Upstart
 
@@ -85,6 +73,6 @@ To run loftus create this in `/etc/init/loftus.conf`:
     env HOME=/home/graham
     env DISPLAY=:0.0
 
-    exec /usr/local/bin/loftus --dir=/home/graham/loftus
+    exec /usr/local/bin/loftus --dir=/home/graham/loftus --address=my.example.com:8007
 
 Be sure to change all instances of 'graham' to your username.
