@@ -1,4 +1,3 @@
-
 Attempt to store my dotfiles etc in a git repo, and make a Go daemon that manages it for me, using inotify.
 
 NOT READY YET.
@@ -54,25 +53,4 @@ On server:
 
 Copy `loftus` to `/usr/local/bin`. Also create `/usr/local/bin/loftus_info` and `/usr/local/bin/loftus_alert` (program gives suggestions for contents on startup).
 
-To run loftus create this in `/etc/init/loftus.conf`:
-
-    author "Graham King <graham@gkgk.org>"
-    description "Loftus: Git/inotify personal backup"
-
-    start on startup
-    stop on shutdown
-
-    console log            # Log stdout to /var/log/upstart/
-
-    respawn                # Re-start if it crashes
-    respawn limit 2 5      # Abort if more than 2 restarts in 5 sec
-
-    setuid graham
-    setgid graham
-
-    env HOME=/home/graham
-    env DISPLAY=:0.0
-
-    exec /usr/local/bin/loftus --dir=/home/graham/loftus --address=my.example.com:8007
-
-Be sure to change all instances of 'graham' to your username.
+Copy the example `loftus.conf` into `/etc/init/loftus.conf`. Be sure to change all instances of 'graham' to your username.
