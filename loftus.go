@@ -146,8 +146,14 @@ func (self *Client) run() {
 			self.Sync("Incoming")
 
 		case <-time.After(SYNC_IDLE_SECS * time.Second):
+
 			if len(events) != 0 {
+
 				self.Sync(commitMsg(events))
+				if self.isOnline {
+					self.broadcast()
+				}
+
 				events = make([]Event, 0, 1)
 			}
 		}
@@ -160,7 +166,7 @@ func commitMsg(events []Event) string {
 
 	var msg string
 	var msgs, arr []string
-	byType := make(map[string] []string)
+	byType := make(map[string][]string)
 
 	// Group by event type
 	for _, event := range events {
@@ -226,7 +232,6 @@ func (self *Client) Sync(commitMsg string) error {
 		if err != nil {
 			return err
 		}
-		self.broadcast()
 	}
 
 	log.Println("* Sync end")
