@@ -8,7 +8,7 @@ import (
 	"os/exec"
 )
 
-// Run a series of checks on the environment, aborting if any errors
+// CheckEverything runs a series of checks on the environment, aborting if any errors
 func CheckEverything(external External, syncDir string, storage Storage, config *Config) {
 
 	abortOnErr := func(err error) {
