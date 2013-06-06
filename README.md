@@ -1,6 +1,6 @@
 Attempt to store my dotfiles etc in a git repo, and make a Go daemon that manages it for me, using inotify.
 
-NOT READY YET.
+ALMOST READY
 
 ## Working Notes
 
